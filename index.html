@@ -129,6 +129,10 @@
   .sticker{background:var(--paper);font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:7px 10px;border-radius:4px;border:1.5px solid var(--line-strong);}
   .sticker.give{background:var(--red-soft);color:var(--red-deep);border-color:#F4B8B4;}
   .sticker.get{background:#FFFAD6;color:#7A6D00;border-color:var(--yellow-deep);}
+  .trade-header-cols{display:grid;grid-template-columns:140px 1fr 1fr;gap:10px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);padding:0 4px;margin-bottom:6px;}
+  .trade-team-row{display:grid;grid-template-columns:140px 1fr 1fr;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);align-items:start;}
+  .trade-team-row:last-child{border-bottom:none;}
+  .trade-team-label{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;}
   .empty-note{color:var(--mist-soft);font-size:13px;font-style:italic;}
   .contact-line{margin-top:14px;font-size:13px;color:var(--mist);}
 
@@ -575,19 +579,18 @@ function renderGroups(filter=''){
 }
 
 /* ============================================================ TRADE BOARD ============================================================ */
+let selectedTradeMember = null;
 let tradeSelection = { give: new Set(), get: new Set() };
-function dupChips(collectionMap, selectedSet, side){
-  const dups = MASTER.filter(s => (collectionMap.get(s.code)||{}).status === 'duplicate');
-  if (dups.length === 0) return `<p class="empty-note">No duplicates.</p>`;
-  return `<div class="sticker-chips">${dups.map(s=>{
-    const v = collectionMap.get(s.code);
-    const sel = selectedSet.has(s.code);
-    return `<span class="sticker ${side==='give'?'give':'get'} trade-chip" data-side="${side}" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
-  }).join('')}</div>`;
+function chipHtml(s, side){
+  const collectionMap = side==='give' ? myCollection : selectedTradeMember.collection;
+  const v = collectionMap.get(s.code);
+  const sel = (side==='give'?tradeSelection.give:tradeSelection.get).has(s.code);
+  return `<span class="sticker ${side} trade-chip" data-side="${side}" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
 }
 async function renderTradeBoard(main){
   main.innerHTML = `<div class="panel"><h2>Trade Board</h2><div class="loading">Loading members…</div></div>`;
   await loadAllMembers();
+  selectedTradeMember = null;
   const others = allMembers.filter(m=>m.id!==profile.id);
   const matches = others.map(m=>{
     const youGet=[], youGive=[];
@@ -602,42 +605,56 @@ async function renderTradeBoard(main){
 
   const main2 = document.getElementById('main');
   main2.innerHTML = `
+    <div class="panel" id="builderPanel" style="display:none;position:sticky;top:66px;z-index:10;"></div>
     <div class="panel">
       <h2>Trade Board</h2>
-      <p class="lead">Click anyone to see both your duplicate lists side by side. Click any sticker to add it to a proposal, then send it.</p>
+      <p class="lead">Click anyone below — the trade builder opens above, grouped by team so it's easy to compare.</p>
       <div id="memberList"></div>
       ${matches.length===0?'<p class="empty-note">No one else has imported their album yet — share the link!</p>':''}
     </div>`;
   const list = document.getElementById('memberList');
   list.innerHTML = matches.map(x=>`
-    <div>
-      <div class="member-row" data-id="${x.member.id}">
-        <div class="name">${x.member.pseudo}</div>
-        <div class="match-counts"><span class="get">↓ ${x.youGet.length} possible</span><span class="give">↑ ${x.youGive.length} possible</span></div>
-      </div>
-      <div class="detail" id="detail-${x.member.id}" style="display:none;"></div>
+    <div class="member-row" data-id="${x.member.id}">
+      <div class="name">${x.member.pseudo}</div>
+      <div class="match-counts"><span class="get">↓ ${x.youGet.length} possible</span><span class="give">↑ ${x.youGive.length} possible</span></div>
     </div>`).join('');
   list.querySelectorAll('.member-row').forEach(row=>{
     row.onclick = ()=>{
-      const id = row.dataset.id;
-      const detail = document.getElementById('detail-'+id);
-      const isOpen = detail.style.display==='block';
-      list.querySelectorAll('.detail').forEach(d=>d.style.display='none');
-      if (isOpen) return;
+      const x = matches.find(m=>m.member.id===row.dataset.id);
+      selectedTradeMember = x.member;
       tradeSelection = { give: new Set(), get: new Set() };
-      const x = matches.find(m=>m.member.id===id);
-      x.youGet.forEach(c=>tradeSelection.get.add(c));
-      x.youGive.forEach(c=>tradeSelection.give.add(c));
-      renderTradeDetail(detail, x.member);
-      detail.style.display='block';
+      renderTradeBuilder();
+      document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
     };
   });
 }
-function renderTradeDetail(detail, member){
-  detail.innerHTML = `
-    <div class="cols">
-      <div><h4>Your duplicates — click to offer</h4>${dupChips(myCollection, tradeSelection.give, 'give')}</div>
-      <div><h4>${member.pseudo}'s duplicates — click to request</h4>${dupChips(member.collection, tradeSelection.get, 'get')}</div>
+function renderTradeBuilder(){
+  const panel = document.getElementById('builderPanel');
+  const member = selectedTradeMember;
+  panel.style.display = 'block';
+  const groupsWithDups = GROUPS.filter(g=>{
+    const teamCodes = MASTER.filter(s=>s.team===g).map(s=>s.code);
+    return teamCodes.some(c=>(myCollection.get(c)||{}).status==='duplicate') || teamCodes.some(c=>(member.collection.get(c)||{}).status==='duplicate');
+  });
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h2 style="font-size:18px;">Trade with ${member.pseudo}</h2>
+      <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
+    </div>
+    <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
+    <div id="tradeGroups" style="max-height:320px;overflow-y:auto;">
+      ${groupsWithDups.length===0?'<p class="empty-note">Neither of you has any duplicates yet.</p>':groupsWithDups.map(g=>{
+        const [name] = TEAM_INFO[g];
+        const teamCodes = MASTER.filter(s=>s.team===g);
+        const mineDups = teamCodes.filter(s=>(myCollection.get(s.code)||{}).status==='duplicate');
+        const theirsDups = teamCodes.filter(s=>(member.collection.get(s.code)||{}).status==='duplicate');
+        return `
+        <div class="trade-team-row">
+          <div class="trade-team-label">${teamLabel(g)}<span>${name}</span></div>
+          <div class="sticker-chips">${mineDups.length?mineDups.map(s=>chipHtml(s,'give')).join(''):'<span class="empty-note">—</span>'}</div>
+          <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>chipHtml(s,'get')).join(''):'<span class="empty-note">—</span>'}</div>
+        </div>`;
+      }).join('')}
     </div>
     <div style="margin-top:14px;font-size:13px;color:var(--mist);">
       <strong>You give:</strong> ${[...tradeSelection.give].join(', ')||'none selected'}<br>
@@ -645,11 +662,12 @@ function renderTradeDetail(detail, member){
     </div>
     <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(tradeSelection.give.size===0 && tradeSelection.get.size===0)?'disabled':''}>Send trade proposal</button>
     <div id="proposalMsg"></div>`;
-  detail.querySelectorAll('.trade-chip').forEach(c=>{
+  document.getElementById('closeBuilderBtn').onclick = ()=>{ panel.style.display='none'; selectedTradeMember=null; };
+  panel.querySelectorAll('.trade-chip').forEach(c=>{
     c.onclick = ()=>{
       const set = c.dataset.side==='give' ? tradeSelection.give : tradeSelection.get;
       if (set.has(c.dataset.code)) set.delete(c.dataset.code); else set.add(c.dataset.code);
-      renderTradeDetail(detail, member);
+      renderTradeBuilder();
     };
   });
   const sendBtn = document.getElementById('sendProposalBtn');
