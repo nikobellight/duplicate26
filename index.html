@@ -434,14 +434,18 @@ function renderImport(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Import from Sticker Album 2026</h2>
-      <p class="lead">Open the MoovTech app → share your missing list and your duplicate list → paste both blocks below.</p>
-      <textarea class="import-box" id="importBox" placeholder="Paste your export here…"></textarea>
+      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.</p>
+      <label>Missing stickers list</label>
+      <textarea class="import-box" id="importMissing" placeholder="Paste your MISSING stickers export here…" style="min-height:140px;"></textarea>
+      <div style="height:14px;"></div>
+      <label>Duplicate stickers list</label>
+      <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
       <div class="example">Re-pasting later replaces your saved album with the new export — handy after opening new packs.</div>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
-    const text = document.getElementById('importBox').value;
+    const text = document.getElementById('importMissing').value + '\n' + document.getElementById('importDuplicates').value;
     const result = parseExport(text);
     const have = MASTER.length - result.missing.length;
     const dupTypes = Object.keys(result.duplicates).length;
