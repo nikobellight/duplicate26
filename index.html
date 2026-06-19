@@ -107,7 +107,7 @@
   .team-body{display:none;padding:14px 16px;background:var(--paper);}
   .team-body.open{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:8px;}
   .cell{aspect-ratio:2/3;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:-0.02em;font-weight:700;cursor:pointer;border:1.5px solid var(--line-strong);position:relative;transition:transform .08s ease;}
-  .cell:hover{transform:translateY(-2px);}
+  .cell[data-picker-toggle]:hover{transform:translateY(-2px);}
   .cell.s-have{background:var(--paper);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,0.06);}
   .cell.s-missing{background:var(--paper-soft);color:var(--mist-soft);border-style:dashed;}
   .cell.s-duplicate{background:linear-gradient(135deg,#FFF9B0,var(--yellow) 70%);color:#5C5400;border-color:var(--yellow-deep);}
@@ -350,10 +350,6 @@ async function saveCollection(missing, duplicates){
   }
   myCollection = map;
 }
-async function setStickerStatus(code, status, count, parallel='normal'){
-  await sb.from('collections').upsert({ user_id:profile.id, sticker_code:code, status, duplicate_count:count, parallel, updated_at:new Date().toISOString() });
-  myCollection.set(code, {status, count, parallel});
-}
 
 /* ============================================================ AUTH HELPERS (simple hashed password, no email) ============================================================ */
 async function hashPassword(password, salt){
@@ -521,7 +517,7 @@ function renderAlbum(main){
   main.innerHTML = `
     <div class="panel">
       <h2>My Album</h2>
-      <p class="lead">Click any sticker to update it by hand — useful right after opening a new pack.</p>
+      <p class="lead">This view is read-only. The only way to change what's missing, owned, or duplicate is re-pasting your current lists in <strong>Import</strong> — that keeps your album exactly in sync with the real app, no accidental clicks. (Color-tagging a duplicate's parallel under "My duplicates" still works the normal way.)</p>
       <div class="stat-row">
         <div class="stat"><div class="num">${completionPct()}%</div><div class="lbl">Complete</div></div>
         <div class="stat"><div class="num">${have+dup}</div><div class="lbl">Owned</div></div>
@@ -586,7 +582,7 @@ function renderGroups(filter=''){
               const pickerHtml = openParallelPicker===s.code ? editablePicker(s.code, v.parallel||'normal') : '';
               return `<div class="${openParallelPicker===s.code?'duplicate-card-open':''}">${cardHtml}${pickerHtml}</div>`;
             }
-            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
+            return `<div class="cell s-${v.status}" data-code="${s.code}" style="cursor:default;">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
           }).join('')}
         </div>
       </div>`;
@@ -611,22 +607,6 @@ function renderGroups(filter=''){
       renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase());
     };
   });
-  if (statusFilter !== 'duplicate'){
-    holder.querySelectorAll('.cell').forEach(c=>{
-      c.onclick = async (ev)=>{
-        ev.stopPropagation();
-        const code = c.dataset.code;
-        const cur = myCollection.get(code) || {status:'have',count:0,parallel:'normal'};
-        let next;
-        if (cur.status==='have') next = {status:'missing', count:0, parallel:'normal'};
-        else if (cur.status==='missing') next = {status:'duplicate', count:1, parallel:'normal'};
-        else if (cur.status==='duplicate' && cur.count<5) next = {status:'duplicate', count:cur.count+1, parallel:cur.parallel||'normal'};
-        else next = {status:'have', count:0, parallel:'normal'};
-        await setStickerStatus(code, next.status, next.count, next.parallel);
-        renderAlbum(document.getElementById('main'));
-      };
-    });
-  }
 }
 
 /* ============================================================ TRADE BOARD ============================================================ */
