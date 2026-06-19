@@ -128,7 +128,18 @@
   .sticker-chips{display:flex;flex-wrap:wrap;gap:8px;}
   .sticker{background:var(--paper);font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:7px 10px;border-radius:4px;border:1.5px solid var(--line-strong);}
   .sticker.give{background:var(--red-soft);color:var(--red-deep);border-color:#F4B8B4;}
-  .sticker.get{background:#FFFAD6;color:#7A6D00;border-color:var(--yellow-deep);}
+  .sticker.get{background:var(--blue-soft);color:var(--blue-deep);border-color:#AECBE9;}
+  .parallel-picker{display:flex;align-items:center;gap:4px;margin-top:5px;}
+  .parallel-dot{width:15px;height:15px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
+  .parallel-dot.active{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px var(--ink);}
+  .parallel-dot.tag-normal{background:#fff;}
+  .parallel-dot.tag-blue{background:var(--blue);}
+  .parallel-dot.tag-red{background:var(--red);}
+  .parallel-dot.tag-purple{background:#8E44AD;}
+  .parallel-dot.tag-green{background:var(--green);}
+  .parallel-dot.tag-black{background:#1A1A1A;}
+  .parallel-label{font-size:10.5px;color:var(--mist);text-transform:capitalize;}
+  .trade-card-block{display:inline-flex;flex-direction:column;align-items:flex-start;margin:0 10px 12px 0;}
   .trade-header-cols{display:grid;grid-template-columns:140px 1fr 1fr;gap:10px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);padding:0 4px;margin-bottom:6px;}
   .trade-team-row{display:grid;grid-template-columns:140px 1fr 1fr;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);align-items:start;}
   .trade-team-row:last-child{border-bottom:none;}
@@ -254,9 +265,9 @@ function parseExport(text){
 function buildCollectionMap(missing, duplicates){
   const map = new Map();
   for (const s of MASTER){
-    if (duplicates[s.code]) map.set(s.code, {status:'duplicate', count:duplicates[s.code]});
-    else if (missing.includes(s.code)) map.set(s.code, {status:'missing', count:0});
-    else map.set(s.code, {status:'have', count:0});
+    if (duplicates[s.code]) map.set(s.code, {status:'duplicate', count:duplicates[s.code], parallel:'normal'});
+    else if (missing.includes(s.code)) map.set(s.code, {status:'missing', count:0, parallel:'normal'});
+    else map.set(s.code, {status:'have', count:0, parallel:'normal'});
   }
   return map;
 }
@@ -290,9 +301,9 @@ function renderNotConfigured(){
 
 /* ============================================================ DATA ============================================================ */
 async function loadMyCollection(){
-  const { data } = await sb.from('collections').select('sticker_code,status,duplicate_count').eq('user_id', profile.id);
+  const { data } = await sb.from('collections').select('sticker_code,status,duplicate_count,parallel').eq('user_id', profile.id);
   myCollection = new Map();
-  (data||[]).forEach(r=>myCollection.set(r.sticker_code, {status:r.status, count:r.duplicate_count}));
+  (data||[]).forEach(r=>myCollection.set(r.sticker_code, {status:r.status, count:r.duplicate_count, parallel:r.parallel||'normal'}));
 }
 async function fetchAllRows(table, columns){
   let all = [];
@@ -309,12 +320,12 @@ async function fetchAllRows(table, columns){
 }
 async function loadAllMembers(){
   const profiles = await fetchAllRows('profiles', 'id,pseudo');
-  const rows = await fetchAllRows('collections', 'user_id,sticker_code,status,duplicate_count');
+  const rows = await fetchAllRows('collections', 'user_id,sticker_code,status,duplicate_count,parallel');
   const byUser = new Map();
   (profiles||[]).forEach(p=>byUser.set(p.id, {...p, collection:new Map()}));
   (rows||[]).forEach(r=>{
     const u = byUser.get(r.user_id);
-    if (u) u.collection.set(r.sticker_code, {status:r.status, count:r.duplicate_count});
+    if (u) u.collection.set(r.sticker_code, {status:r.status, count:r.duplicate_count, parallel:r.parallel||'normal'});
   });
   allMembers = [...byUser.values()];
 }
@@ -322,16 +333,16 @@ async function saveCollection(missing, duplicates){
   const map = buildCollectionMap(missing, duplicates);
   await sb.from('collections').delete().eq('user_id', profile.id);
   const rows = [];
-  for (const [code, v] of map.entries()) rows.push({ user_id:profile.id, sticker_code:code, status:v.status, duplicate_count:v.count });
+  for (const [code, v] of map.entries()) rows.push({ user_id:profile.id, sticker_code:code, status:v.status, duplicate_count:v.count, parallel:v.parallel||'normal' });
   for (let i=0;i<rows.length;i+=500){
     const { error } = await sb.from('collections').insert(rows.slice(i,i+500));
     if (error) throw error;
   }
   myCollection = map;
 }
-async function setStickerStatus(code, status, count){
-  await sb.from('collections').upsert({ user_id:profile.id, sticker_code:code, status, duplicate_count:count, updated_at:new Date().toISOString() });
-  myCollection.set(code, {status, count});
+async function setStickerStatus(code, status, count, parallel='normal'){
+  await sb.from('collections').upsert({ user_id:profile.id, sticker_code:code, status, duplicate_count:count, parallel, updated_at:new Date().toISOString() });
+  myCollection.set(code, {status, count, parallel});
 }
 
 /* ============================================================ AUTH HELPERS (simple hashed password, no email) ============================================================ */
@@ -453,7 +464,7 @@ function renderImport(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Import from Sticker Album 2026</h2>
-      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.</p>
+      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.<br>Not sure what a code looks like? <a href="https://www.laststicker.com/cards/preview/panini_world_cup_2026/" target="_blank" rel="noopener">Browse the sticker images on LastSticker.com ↗</a></p>
       <label>Missing stickers list</label>
       <textarea class="import-box" id="importMissing" placeholder="Paste your MISSING stickers export here…" style="min-height:140px;"></textarea>
       <div style="height:14px;"></div>
@@ -552,8 +563,8 @@ function renderGroups(filter=''){
         </div>
         <div class="team-body ${isOpen?'open':''}">
           ${visibleStickers.map(s=>{
-            const v = myCollection.get(s.code) || {status:'have',count:0};
-            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code}</div>`;
+            const v = myCollection.get(s.code) || {status:'have',count:0,parallel:'normal'};
+            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
           }).join('')}
         </div>
       </div>`;
@@ -566,13 +577,13 @@ function renderGroups(filter=''){
     c.onclick = async (ev)=>{
       ev.stopPropagation();
       const code = c.dataset.code;
-      const cur = myCollection.get(code) || {status:'have',count:0};
+      const cur = myCollection.get(code) || {status:'have',count:0,parallel:'normal'};
       let next;
-      if (cur.status==='have') next = {status:'missing', count:0};
-      else if (cur.status==='missing') next = {status:'duplicate', count:1};
-      else if (cur.status==='duplicate' && cur.count<5) next = {status:'duplicate', count:cur.count+1};
-      else next = {status:'have', count:0};
-      await setStickerStatus(code, next.status, next.count);
+      if (cur.status==='have') next = {status:'missing', count:0, parallel:'normal'};
+      else if (cur.status==='missing') next = {status:'duplicate', count:1, parallel:'normal'};
+      else if (cur.status==='duplicate' && cur.count<5) next = {status:'duplicate', count:cur.count+1, parallel:cur.parallel||'normal'};
+      else next = {status:'have', count:0, parallel:'normal'};
+      await setStickerStatus(code, next.status, next.count, next.parallel);
       renderAlbum(document.getElementById('main'));
     };
   });
@@ -581,11 +592,20 @@ function renderGroups(filter=''){
 /* ============================================================ TRADE BOARD ============================================================ */
 let selectedTradeMember = null;
 let tradeSelection = { give: new Set(), get: new Set() };
-function chipHtml(s, side){
-  const collectionMap = side==='give' ? myCollection : selectedTradeMember.collection;
-  const v = collectionMap.get(s.code);
-  const sel = (side==='give'?tradeSelection.give:tradeSelection.get).has(s.code);
-  return `<span class="sticker ${side} trade-chip" data-side="${side}" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+const PARALLEL_TAGS = ['normal','blue','red','purple','green','black'];
+function parseTradeCode(raw){
+  const [code, parallel] = raw.split(':');
+  return { code, parallel: parallel || 'normal' };
+}
+function parallelDot(tag, extraStyle){
+  return `<span class="parallel-dot tag-${tag} active" style="cursor:default;${extraStyle||''}"></span>`;
+}
+function editablePicker(code, current){
+  return `<div class="parallel-picker">${PARALLEL_TAGS.map(p=>`<span class="parallel-dot tag-${p} ${current===p?'active':''}" data-tag-code="${code}" data-tag-value="${p}" title="${p}"></span>`).join('')}<span class="parallel-label">${current}</span></div>`;
+}
+function tradeChip(raw, side){
+  const { code, parallel } = parseTradeCode(raw);
+  return `<span class="sticker ${side}">${code}${parallel!=='normal'?' '+parallelDot(parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
 }
 async function renderTradeBoard(main){
   main.innerHTML = `<div class="panel"><h2>Trade Board</h2><div class="loading">Loading members…</div></div>`;
@@ -631,11 +651,14 @@ async function renderTradeBoard(main){
 function renderTradeBuilder(){
   const panel = document.getElementById('builderPanel');
   const member = selectedTradeMember;
+  const prevTG = document.getElementById('tradeGroups');
+  const prevScroll = prevTG ? prevTG.scrollTop : 0;
   panel.style.display = 'block';
   const groupsWithDups = GROUPS.filter(g=>{
     const teamCodes = MASTER.filter(s=>s.team===g).map(s=>s.code);
     return teamCodes.some(c=>(myCollection.get(c)||{}).status==='duplicate') || teamCodes.some(c=>(member.collection.get(c)||{}).status==='duplicate');
   });
+  const giveList = [...tradeSelection.give], getList = [...tradeSelection.get];
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <h2 style="font-size:18px;">Trade with ${member.pseudo}</h2>
@@ -651,16 +674,38 @@ function renderTradeBuilder(){
         return `
         <div class="trade-team-row">
           <div class="trade-team-label">${teamLabel(g)}<span>${name}</span></div>
-          <div class="sticker-chips">${mineDups.length?mineDups.map(s=>chipHtml(s,'give')).join(''):'<span class="empty-note">—</span>'}</div>
-          <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>chipHtml(s,'get')).join(''):'<span class="empty-note">—</span>'}</div>
+          <div>${mineDups.length?mineDups.map(s=>{
+            const v = myCollection.get(s.code);
+            const sel = tradeSelection.give.has(s.code);
+            return `<div class="trade-card-block">
+              <span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>
+              ${editablePicker(s.code, v.parallel||'normal')}
+            </div>`;
+          }).join(''):'<span class="empty-note">—</span>'}</div>
+          <div>${theirsDups.length?theirsDups.map(s=>{
+            const v = member.collection.get(s.code);
+            const sel = tradeSelection.get.has(s.code);
+            return `<div class="trade-card-block">
+              <span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>
+              ${v.parallel && v.parallel!=='normal' ? `<div class="parallel-picker">${parallelDot(v.parallel)}<span class="parallel-label">${v.parallel}</span></div>` : ''}
+            </div>`;
+          }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>`;
       }).join('')}
     </div>
-    <div style="margin-top:14px;font-size:13px;color:var(--mist);">
-      <strong>You give:</strong> ${[...tradeSelection.give].join(', ')||'none selected'}<br>
-      <strong>You get:</strong> ${[...tradeSelection.get].join(', ')||'none selected'}
+    <div style="margin-top:16px;">
+      <h4>You give${giveList.length?` (${giveList.length})`:''}</h4>
+      <div class="sticker-chips">${giveList.length?giveList.map(c=>{
+        const v = myCollection.get(c)||{};
+        return `<span class="sticker give">${c}${v.parallel&&v.parallel!=='normal'?' '+parallelDot(v.parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
+      }).join(''):'<span class="empty-note">none selected</span>'}</div>
+      <h4 style="margin-top:10px;">You get${getList.length?` (${getList.length})`:''}</h4>
+      <div class="sticker-chips">${getList.length?getList.map(c=>{
+        const v = member.collection.get(c)||{};
+        return `<span class="sticker get">${c}${v.parallel&&v.parallel!=='normal'?' '+parallelDot(v.parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
+      }).join(''):'<span class="empty-note">none selected</span>'}</div>
     </div>
-    <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(tradeSelection.give.size===0 && tradeSelection.get.size===0)?'disabled':''}>Send trade proposal</button>
+    <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(giveList.length===0 && getList.length===0)?'disabled':''}>Send trade proposal</button>
     <div id="proposalMsg"></div>`;
   document.getElementById('closeBuilderBtn').onclick = ()=>{ panel.style.display='none'; selectedTradeMember=null; };
   panel.querySelectorAll('.trade-chip').forEach(c=>{
@@ -670,11 +715,22 @@ function renderTradeBuilder(){
       renderTradeBuilder();
     };
   });
+  panel.querySelectorAll('[data-tag-code]').forEach(d=>{
+    d.onclick = async (ev)=>{
+      ev.stopPropagation();
+      await setStickerParallel(d.dataset.tagCode, d.dataset.tagValue);
+      renderTradeBuilder();
+    };
+  });
+  const tg = document.getElementById('tradeGroups');
+  if (tg) tg.scrollTop = prevScroll;
   const sendBtn = document.getElementById('sendProposalBtn');
   if (sendBtn) sendBtn.onclick = async ()=>{
     sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
     try{
-      await sendTradeProposal(member.id, [...tradeSelection.give], [...tradeSelection.get]);
+      const offerCodes = giveList.map(c=>{ const v=myCollection.get(c)||{}; return v.parallel && v.parallel!=='normal' ? `${c}:${v.parallel}` : c; });
+      const requestCodes = getList.map(c=>{ const v=member.collection.get(c)||{}; return v.parallel && v.parallel!=='normal' ? `${c}:${v.parallel}` : c; });
+      await sendTradeProposal(member.id, offerCodes, requestCodes);
       document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Proposal sent to ${member.pseudo} — find it under "My Trades".</div>`;
     }catch(e){
       sendBtn.disabled = false; sendBtn.textContent = 'Send trade proposal';
@@ -685,6 +741,12 @@ function renderTradeBuilder(){
 
 /* ============================================================ TRADE PROPOSALS (data + transfer logic) ============================================================ */
 let myTrades = [];
+async function setStickerParallel(code, parallel){
+  await sb.from('collections').update({ parallel, updated_at:new Date().toISOString() }).eq('user_id', profile.id).eq('sticker_code', code);
+  const v = myCollection.get(code) || {status:'duplicate', count:1, parallel:'normal'};
+  v.parallel = parallel;
+  myCollection.set(code, v);
+}
 async function sendTradeProposal(toUserId, offerCodes, requestCodes){
   const id = crypto.randomUUID();
   const { error } = await sb.from('trade_proposals').insert({
@@ -696,22 +758,23 @@ async function loadMyTrades(){
   const { data } = await sb.from('trade_proposals').select('*').or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`).order('created_at', {ascending:false});
   myTrades = data || [];
 }
-async function transferCodes(giverId, receiverId, codes){
-  for (const code of codes){
+async function transferCodes(giverId, receiverId, rawCodes){
+  for (const raw of rawCodes){
+    const { code, parallel } = parseTradeCode(raw);
     const { data: giverRow } = await sb.from('collections').select('*').eq('user_id', giverId).eq('sticker_code', code).maybeSingle();
     const { data: receiverRow } = await sb.from('collections').select('*').eq('user_id', receiverId).eq('sticker_code', code).maybeSingle();
     if (giverRow && giverRow.status==='duplicate'){
       const newCount = giverRow.duplicate_count - 1;
-      await sb.from('collections').update({ status: newCount>0?'duplicate':'have', duplicate_count: Math.max(newCount,0), updated_at:new Date().toISOString() }).eq('user_id', giverId).eq('sticker_code', code);
+      await sb.from('collections').update({ status: newCount>0?'duplicate':'have', duplicate_count: Math.max(newCount,0), parallel: newCount>0?giverRow.parallel:'normal', updated_at:new Date().toISOString() }).eq('user_id', giverId).eq('sticker_code', code);
     }
     if (receiverRow){
       let newStatus, newCount;
       if (receiverRow.status==='missing'){ newStatus='have'; newCount=0; }
       else if (receiverRow.status==='have'){ newStatus='duplicate'; newCount=1; }
       else { newStatus='duplicate'; newCount=receiverRow.duplicate_count+1; }
-      await sb.from('collections').update({ status:newStatus, duplicate_count:newCount, updated_at:new Date().toISOString() }).eq('user_id', receiverId).eq('sticker_code', code);
+      await sb.from('collections').update({ status:newStatus, duplicate_count:newCount, parallel, updated_at:new Date().toISOString() }).eq('user_id', receiverId).eq('sticker_code', code);
     } else {
-      await sb.from('collections').insert({ user_id:receiverId, sticker_code:code, status:'have', duplicate_count:0 });
+      await sb.from('collections').insert({ user_id:receiverId, sticker_code:code, status:'have', duplicate_count:0, parallel });
     }
   }
 }
@@ -750,9 +813,9 @@ async function renderMyTrades(main){
         <div class="member-row" style="cursor:default;align-items:flex-start;">
           <div>
             <div class="name">${pseudoOf(t.from_user)} offers you</div>
-            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>`<span class="sticker get">${c}</span>`).join('')}</div>
+            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>tradeChip(c,'get')).join('')}</div>
             <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">in exchange for your:</div>
-            <div class="sticker-chips">${t.request_codes.map(c=>`<span class="sticker give">${c}</span>`).join('')}</div>
+            <div class="sticker-chips">${t.request_codes.map(c=>tradeChip(c,'give')).join('')}</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
             <button class="btn" data-accept="${t.id}">Accept</button>
@@ -764,9 +827,9 @@ async function renderMyTrades(main){
         <div class="member-row" style="cursor:default;align-items:flex-start;">
           <div>
             <div class="name">To ${pseudoOf(t.to_user)} — you give</div>
-            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>`<span class="sticker give">${c}</span>`).join('')}</div>
+            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>tradeChip(c,'give')).join('')}</div>
             <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">for their:</div>
-            <div class="sticker-chips">${t.request_codes.map(c=>`<span class="sticker get">${c}</span>`).join('')}</div>
+            <div class="sticker-chips">${t.request_codes.map(c=>tradeChip(c,'get')).join('')}</div>
           </div>
           <button class="btn ghost" data-cancel="${t.id}">Cancel</button>
         </div>`).join('')}
