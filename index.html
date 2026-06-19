@@ -441,7 +441,7 @@ function renderShell(){
       </div>
     </div>
     <main id="main"></main>
-    <div class="footer-note">Not affiliated with Panini or FIFA. Built for the office, just for fun.</div>`;
+    <div class="footer-note">Not affiliated with Panini or FIFA. Built for the office, just for fun. · <a href="https://www.laststicker.com/cards/preview/panini_world_cup_2026/" target="_blank" rel="noopener">See sticker images on LastSticker.com ↗</a></div>`;
   document.getElementById('switchBtn').onclick = ()=>{ localStorage.removeItem('my_profile_id'); profile=null; renderAuth(); };
   document.querySelectorAll('nav.tabs button').forEach(b=>{ b.onclick = ()=>{ if (b.disabled) return; currentTab = b.dataset.tab; renderTab(); }; });
   if (!hasData) currentTab = 'import';
@@ -480,6 +480,8 @@ function renderImport(main){
     const have = MASTER.length - result.missing.length;
     const dupTypes = Object.keys(result.duplicates).length;
     const dupTotal = Object.values(result.duplicates).reduce((a,b)=>a+b,0);
+    const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
+    const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code) && !result.duplicates[code]);
     document.getElementById('previewArea').innerHTML = `
       <div class="stat-row">
         <div class="stat"><div class="num">${have}</div><div class="lbl">Stickers owned</div></div>
@@ -488,6 +490,7 @@ function renderImport(main){
         <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
       </div>
       ${result.unmatched.length? `<div class="msg err">Could not read ${result.unmatched.length} entr${result.unmatched.length>1?'ies':'y'}: ${result.unmatched.slice(0,10).join(', ')}${result.unmatched.length>10?'…':''}</div>`:''}
+      ${noLongerMissing.length? `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before (e.g. ${noLongerMissing.slice(0,6).join(', ')}${noLongerMissing.length>6?'…':''}) aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned. Make sure you copied your full, current missing list from the app — not a partial one — before saving.</div>`:''}
       <button class="btn full" id="confirmImportBtn" style="margin-top:14px;">Save this to my album</button>`;
     document.getElementById('confirmImportBtn').onclick = async ()=>{
       const b = document.getElementById('confirmImportBtn'); b.disabled=true; b.textContent='Saving…';
@@ -564,7 +567,8 @@ function renderGroups(filter=''){
         <div class="team-body ${isOpen?'open':''}">
           ${visibleStickers.map(s=>{
             const v = myCollection.get(s.code) || {status:'have',count:0,parallel:'normal'};
-            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
+            const cellHtml = `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
+            return statusFilter==='duplicate' ? `<div>${cellHtml}${editablePicker(s.code, v.parallel||'normal')}</div>` : cellHtml;
           }).join('')}
         </div>
       </div>`;
@@ -572,6 +576,13 @@ function renderGroups(filter=''){
   holder.innerHTML = html || `<p class="empty-note">${statusFilter!=='all'?'Nothing matches that filter.':`No team matches "${filter}".`}</p>`;
   holder.querySelectorAll('.team-head').forEach(h=>{
     h.onclick = ()=>{ const g = h.dataset.toggle; if (openTeams.has(g)) openTeams.delete(g); else openTeams.add(g); renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase()); };
+  });
+  holder.querySelectorAll('[data-tag-code]').forEach(d=>{
+    d.onclick = async (ev)=>{
+      ev.stopPropagation();
+      await setStickerParallel(d.dataset.tagCode, d.dataset.tagValue);
+      renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase());
+    };
   });
   holder.querySelectorAll('.cell').forEach(c=>{
     c.onclick = async (ev)=>{
@@ -597,15 +608,24 @@ function parseTradeCode(raw){
   const [code, parallel] = raw.split(':');
   return { code, parallel: parallel || 'normal' };
 }
-function parallelDot(tag, extraStyle){
-  return `<span class="parallel-dot tag-${tag} active" style="cursor:default;${extraStyle||''}"></span>`;
+const PARALLEL_CHIP_STYLE = {
+  blue:  {bg:'#E9F2FA', border:'#1C75BC', text:'#145A91'},
+  red:   {bg:'#FDE9E8', border:'#E2231A', text:'#B81810'},
+  purple:{bg:'#F1E6F7', border:'#8E44AD', text:'#6C2E85'},
+  green: {bg:'#E6F7ED', border:'#2FAE66', text:'#1E7A46'},
+  black: {bg:'#E5E5E5', border:'#1A1A1A', text:'#1A1A1A'}
+};
+function parallelChipStyle(parallel){
+  const s = PARALLEL_CHIP_STYLE[parallel];
+  if (!s) return '';
+  return `background:${s.bg};border-color:${s.border};color:${s.text};`;
 }
 function editablePicker(code, current){
-  return `<div class="parallel-picker">${PARALLEL_TAGS.map(p=>`<span class="parallel-dot tag-${p} ${current===p?'active':''}" data-tag-code="${code}" data-tag-value="${p}" title="${p}"></span>`).join('')}<span class="parallel-label">${current}</span></div>`;
+  return `<div class="parallel-picker">${PARALLEL_TAGS.map(p=>`<span class="parallel-dot tag-${p} ${current===p?'active':''}" data-tag-code="${code}" data-tag-value="${p}" title="${p}"></span>`).join('')}</div>`;
 }
 function tradeChip(raw, side){
   const { code, parallel } = parseTradeCode(raw);
-  return `<span class="sticker ${side}">${code}${parallel!=='normal'?' '+parallelDot(parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
+  return `<span class="sticker ${side}" style="${parallelChipStyle(parallel)}">${code}</span>`;
 }
 async function renderTradeBoard(main){
   main.innerHTML = `<div class="panel"><h2>Trade Board</h2><div class="loading">Loading members…</div></div>`;
@@ -659,12 +679,14 @@ function renderTradeBuilder(){
     return teamCodes.some(c=>(myCollection.get(c)||{}).status==='duplicate') || teamCodes.some(c=>(member.collection.get(c)||{}).status==='duplicate');
   });
   const giveList = [...tradeSelection.give], getList = [...tradeSelection.get];
+  const star = `<span style="color:var(--yellow-deep);">★</span> `;
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <h2 style="font-size:18px;">Trade with ${member.pseudo}</h2>
       <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
+    <p class="example" style="margin:-2px 0 8px;">${star}marks a sticker the other person actually needs from you.</p>
     <div id="tradeGroups" style="max-height:320px;overflow-y:auto;">
       ${groupsWithDups.length===0?'<p class="empty-note">Neither of you has any duplicates yet.</p>':groupsWithDups.map(g=>{
         const [name] = TEAM_INFO[g];
@@ -674,21 +696,17 @@ function renderTradeBuilder(){
         return `
         <div class="trade-team-row">
           <div class="trade-team-label">${teamLabel(g)}<span>${name}</span></div>
-          <div>${mineDups.length?mineDups.map(s=>{
+          <div class="sticker-chips">${mineDups.length?mineDups.map(s=>{
             const v = myCollection.get(s.code);
             const sel = tradeSelection.give.has(s.code);
-            return `<div class="trade-card-block">
-              <span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>
-              ${editablePicker(s.code, v.parallel||'normal')}
-            </div>`;
+            const needed = (member.collection.get(s.code)||{}).status==='missing';
+            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
-          <div>${theirsDups.length?theirsDups.map(s=>{
+          <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>{
             const v = member.collection.get(s.code);
             const sel = tradeSelection.get.has(s.code);
-            return `<div class="trade-card-block">
-              <span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>
-              ${v.parallel && v.parallel!=='normal' ? `<div class="parallel-picker">${parallelDot(v.parallel)}<span class="parallel-label">${v.parallel}</span></div>` : ''}
-            </div>`;
+            const needed = (myCollection.get(s.code)||{}).status==='missing';
+            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>`;
       }).join('')}
@@ -697,12 +715,12 @@ function renderTradeBuilder(){
       <h4>You give${giveList.length?` (${giveList.length})`:''}</h4>
       <div class="sticker-chips">${giveList.length?giveList.map(c=>{
         const v = myCollection.get(c)||{};
-        return `<span class="sticker give">${c}${v.parallel&&v.parallel!=='normal'?' '+parallelDot(v.parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
+        return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}">${c}</span>`;
       }).join(''):'<span class="empty-note">none selected</span>'}</div>
       <h4 style="margin-top:10px;">You get${getList.length?` (${getList.length})`:''}</h4>
       <div class="sticker-chips">${getList.length?getList.map(c=>{
         const v = member.collection.get(c)||{};
-        return `<span class="sticker get">${c}${v.parallel&&v.parallel!=='normal'?' '+parallelDot(v.parallel,'width:10px;height:10px;vertical-align:middle;'):''}</span>`;
+        return `<span class="sticker get" style="${parallelChipStyle(v.parallel)}">${c}</span>`;
       }).join(''):'<span class="empty-note">none selected</span>'}</div>
     </div>
     <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(giveList.length===0 && getList.length===0)?'disabled':''}>Send trade proposal</button>
@@ -715,13 +733,6 @@ function renderTradeBuilder(){
       renderTradeBuilder();
     };
   });
-  panel.querySelectorAll('[data-tag-code]').forEach(d=>{
-    d.onclick = async (ev)=>{
-      ev.stopPropagation();
-      await setStickerParallel(d.dataset.tagCode, d.dataset.tagValue);
-      renderTradeBuilder();
-    };
-  });
   const tg = document.getElementById('tradeGroups');
   if (tg) tg.scrollTop = prevScroll;
   const sendBtn = document.getElementById('sendProposalBtn');
@@ -731,7 +742,10 @@ function renderTradeBuilder(){
       const offerCodes = giveList.map(c=>{ const v=myCollection.get(c)||{}; return v.parallel && v.parallel!=='normal' ? `${c}:${v.parallel}` : c; });
       const requestCodes = getList.map(c=>{ const v=member.collection.get(c)||{}; return v.parallel && v.parallel!=='normal' ? `${c}:${v.parallel}` : c; });
       await sendTradeProposal(member.id, offerCodes, requestCodes);
-      document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Proposal sent to ${member.pseudo} — find it under "My Trades".</div>`;
+      const sentPseudo = member.pseudo;
+      tradeSelection = { give: new Set(), get: new Set() };
+      renderTradeBuilder();
+      document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Proposal sent to ${sentPseudo} — find it under "My Trades". Selection cleared, ready to build another separate deal.</div>`;
     }catch(e){
       sendBtn.disabled = false; sendBtn.textContent = 'Send trade proposal';
       document.getElementById('proposalMsg').innerHTML = `<div class="msg err">${e.message}</div>`;
