@@ -663,11 +663,13 @@ async function renderTradeBoard(main){
       const x = matches.find(m=>m.member.id===row.dataset.id);
       selectedTradeMember = x.member;
       tradeSelection = { give: new Set(), get: new Set() };
+      sentDealsThisSession = [];
       renderTradeBuilder();
       document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
     };
   });
 }
+let sentDealsThisSession = [];
 function renderTradeBuilder(){
   const panel = document.getElementById('builderPanel');
   const member = selectedTradeMember;
@@ -686,7 +688,12 @@ function renderTradeBuilder(){
       <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
-    <p class="example" style="margin:-2px 0 8px;">${star}marks a sticker the other person actually needs from you.</p>
+    <p class="example" style="margin:-2px 0 8px;">${star}marks one of their cards you actually need.</p>
+    ${sentDealsThisSession.length?`
+    <div style="background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:14px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">Deals sent this session (${sentDealsThisSession.length}) — each is separate</div>
+      ${sentDealsThisSession.map((d,i)=>`<div style="font-size:12.5px;margin-bottom:4px;"><strong>Deal ${i+1}:</strong> ${d.give.join(', ')||'nothing'} → ${d.get.join(', ')||'nothing'}</div>`).join('')}
+    </div>`:''}
     <div id="tradeGroups" style="max-height:320px;overflow-y:auto;">
       ${groupsWithDups.length===0?'<p class="empty-note">Neither of you has any duplicates yet.</p>':groupsWithDups.map(g=>{
         const [name] = TEAM_INFO[g];
@@ -699,8 +706,7 @@ function renderTradeBuilder(){
           <div class="sticker-chips">${mineDups.length?mineDups.map(s=>{
             const v = myCollection.get(s.code);
             const sel = tradeSelection.give.has(s.code);
-            const needed = (member.collection.get(s.code)||{}).status==='missing';
-            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
           <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>{
             const v = member.collection.get(s.code);
@@ -743,9 +749,10 @@ function renderTradeBuilder(){
       const requestCodes = getList.map(c=>{ const v=member.collection.get(c)||{}; return v.parallel && v.parallel!=='normal' ? `${c}:${v.parallel}` : c; });
       await sendTradeProposal(member.id, offerCodes, requestCodes);
       const sentPseudo = member.pseudo;
+      sentDealsThisSession.push({ give:[...giveList], get:[...getList] });
       tradeSelection = { give: new Set(), get: new Set() };
       renderTradeBuilder();
-      document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Proposal sent to ${sentPseudo} — find it under "My Trades". Selection cleared, ready to build another separate deal.</div>`;
+      document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Deal ${sentDealsThisSession.length} sent to ${sentPseudo} as its own separate proposal — see the log above, and "My Trades" for the full record.</div>`;
     }catch(e){
       sendBtn.disabled = false; sendBtn.textContent = 'Send trade proposal';
       document.getElementById('proposalMsg').innerHTML = `<div class="msg err">${e.message}</div>`;
