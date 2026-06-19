@@ -131,6 +131,14 @@
   .sticker.get{background:var(--blue-soft);color:var(--blue-deep);border-color:#AECBE9;}
   .parallel-picker{display:flex;align-items:center;gap:7px;margin-top:7px;padding:6px;background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;}
   .parallel-dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
+  .parallel-rect{width:38px;height:32px;border-radius:6px;cursor:pointer;border:2px solid var(--line-strong);flex-shrink:0;padding:0;font:inherit;}
+  .parallel-rect.active{border-color:var(--ink);border-width:3px;}
+  .parallel-rect.tag-normal{background:#fff;}
+  .parallel-rect.tag-blue{background:var(--blue);}
+  .parallel-rect.tag-red{background:var(--red);}
+  .parallel-rect.tag-purple{background:#8E44AD;}
+  .parallel-rect.tag-green{background:var(--green);}
+  .parallel-rect.tag-black{background:#1A1A1A;}
   .parallel-dot.active{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px var(--ink);}
   .parallel-dot.tag-normal{background:#fff;}
   .parallel-dot.tag-blue{background:var(--blue);}
@@ -464,7 +472,7 @@ function renderImport(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Import from Sticker Album 2026</h2>
-      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.<br>Not sure what a code looks like? <a href="https://www.laststicker.com/cards/preview/panini_world_cup_2026/" target="_blank" rel="noopener">Browse the sticker images on LastSticker.com ↗</a></p>
+      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.</p>
       <label>Missing stickers list</label>
       <textarea class="import-box" id="importMissing" placeholder="Paste your MISSING stickers export here…" style="min-height:140px;"></textarea>
       <div style="height:14px;"></div>
@@ -511,7 +519,7 @@ function renderAlbum(main){
   main.innerHTML = `
     <div class="panel">
       <h2>My Album</h2>
-      <p class="lead">Click any sticker to update it by hand — useful right after opening a new pack. Got a special parallel color (blue, red, purple, green, black)? Switch to "My duplicates" below to tag it.</p>
+      <p class="lead">Click any sticker to update it by hand — useful right after opening a new pack.</p>
       <div class="stat-row">
         <div class="stat"><div class="num">${completionPct()}%</div><div class="lbl">Complete</div></div>
         <div class="stat"><div class="num">${have+dup}</div><div class="lbl">Owned</div></div>
@@ -523,6 +531,7 @@ function renderAlbum(main){
         <span><span class="sw" style="background:var(--paper-soft);border:1.5px dashed var(--mist-soft)"></span>Missing</span>
         <span><span class="sw" style="background:var(--yellow)"></span>Duplicate</span>
       </div>
+      <div class="msg info" style="display:flex;align-items:center;gap:8px;">🎨 <strong>Got a special parallel (blue/red/purple/green/black)?</strong>&nbsp;Tap "My duplicates" below to tag its color.</div>
       <div class="filter-row">
         <input type="text" id="teamFilter" placeholder="Jump to a team or code (e.g. France, FRA, FRA17)…">
         <button class="btn ghost" data-status="all" style="padding:8px 14px;">All</button>
@@ -639,7 +648,7 @@ function parallelChipStyle(parallel){
   return `background:${s.bg};border-color:${s.border};color:${s.text};`;
 }
 function editablePicker(code, current){
-  return `<div class="parallel-picker">${PARALLEL_TAGS.map(p=>`<span class="parallel-dot tag-${p} ${current===p?'active':''}" data-tag-code="${code}" data-tag-value="${p}" title="${p}"></span>`).join('')}</div>`;
+  return `<div class="parallel-picker">${PARALLEL_TAGS.map(p=>`<button type="button" class="parallel-rect tag-${p} ${current===p?'active':''}" data-tag-code="${code}" data-tag-value="${p}" title="${p}"></button>`).join('')}</div>`;
 }
 function tradeChip(raw, side){
   const { code, parallel } = parseTradeCode(raw);
@@ -666,7 +675,7 @@ async function renderTradeBoard(main){
     <div class="panel" id="builderPanel" style="display:none;position:sticky;top:66px;z-index:10;"></div>
     <div class="panel">
       <h2>Trade Board</h2>
-      <p class="lead">Click anyone below — the trade builder opens above, grouped by team so it's easy to compare. Each "Send" creates one separate deal — pick everything for that one trade, send it, then start fresh for a different deal (with this person or anyone else).</p>
+      <p class="lead">Click anyone below — the trade builder opens above, grouped by team so it's easy to compare.</p>
       <div id="memberList"></div>
       ${matches.length===0?'<p class="empty-note">No one else has imported their album yet — share the link!</p>':''}
     </div>`;
@@ -748,6 +757,7 @@ function renderTradeBuilder(){
       }).join(''):'<span class="empty-note">none selected</span>'}</div>
     </div>
     <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(giveList.length===0 && getList.length===0)?'disabled':''}>Send trade proposal</button>
+    <p class="example" style="margin-top:8px;">Each "Send" creates one separate deal — pick everything for that one trade, send it, then start fresh for a different deal (with this person or anyone else).</p>
     <div id="proposalMsg"></div>`;
   document.getElementById('closeBuilderBtn').onclick = ()=>{ panel.style.display='none'; selectedTradeMember=null; };
   panel.querySelectorAll('.trade-chip').forEach(c=>{
@@ -897,19 +907,20 @@ async function renderWanted(main){
   const allRows = [...demand.entries()]
     .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
     .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code));
-  const rows = allRows.slice(0, 40);
+  const relevantRows = allRows.filter(r=>r.count>=2); // only show genuine overlap, not one lone person
+  const rows = relevantRows.slice(0, 40);
 
   document.getElementById('main').innerHTML = `
     <div class="panel">
       <h2>Most Wanted</h2>
-      <p class="lead">The stickers the most people in the office are missing right now. Ones you can supply are highlighted.</p>
-      ${rows.length===0?'<p class="empty-note">No data yet — share the link so more people import their album!</p>':
+      <p class="lead">Stickers at least 2 people in the office are missing right now. Ones you can supply are highlighted.</p>
+      ${rows.length===0?'<p class="empty-note">Nothing stands out yet — this fills in once more people import their albums and overlap shows up.</p>':
       rows.map(r=>`
         <div class="search-result-row" style="${r.iHaveDupe?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 85%);border-color:var(--yellow-deep);':''}">
           <div>${r.code}${r.iHaveDupe?' <span class="badge-pill promo" style="background:var(--red);color:#fff;">YOU HAVE THIS</span>':''}</div>
-          <div class="count">${r.count} ${r.count===1?'person needs':'people need'} it</div>
+          <div class="count">${r.count} people need it</div>
         </div>`).join('')}
-      ${allRows.length>40?`<p class="example" style="margin-top:14px;">Showing the top 40 most-needed stickers, out of ${allRows.length} total currently missing by someone. Ties are broken alphabetically — that's why it can look like it stops mid-team.</p>`:''}
+      ${relevantRows.length>40?`<p class="example" style="margin-top:14px;">Showing the top 40, out of ${relevantRows.length} stickers currently wanted by 2 or more people. Ties are broken alphabetically — that's why it can look like it stops mid-team.</p>`:''}
     </div>`;
 }
 
