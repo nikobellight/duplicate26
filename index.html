@@ -130,6 +130,7 @@
   .sticker.give{background:var(--red-soft);color:var(--red-deep);border-color:#F4B8B4;}
   .sticker.get{background:var(--blue-soft);color:var(--blue-deep);border-color:#AECBE9;}
   .parallel-picker{display:flex;align-items:center;gap:7px;margin-top:7px;padding:6px;background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;}
+  .duplicate-card-open{grid-column:1/-1;display:inline-flex;flex-direction:column;align-items:flex-start;width:fit-content;position:relative;z-index:5;}
   .parallel-dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
   .parallel-rect{width:38px;height:32px;border-radius:6px;cursor:pointer;border:2px solid var(--line-strong);flex-shrink:0;padding:0;font:inherit;appearance:none;-webkit-appearance:none;outline:none;}
   .parallel-rect:hover{border-color:var(--ink);transform:translateY(-1px);}
@@ -581,9 +582,9 @@ function renderGroups(filter=''){
             if (statusFilter==='duplicate'){
               const tagged = v.parallel && v.parallel!=='normal';
               const cardStyle = tagged ? parallelChipStyle(v.parallel) : '';
-              const cardHtml = `<div class="cell ${tagged?'':'s-have'}" data-code="${s.code}" data-picker-toggle="${s.code}" style="${cardStyle}cursor:pointer;">${v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code}</div>`;
+              const cardHtml = `<div class="cell ${tagged?'':'s-have'}" data-code="${s.code}" data-picker-toggle="${s.code}" style="${cardStyle}cursor:pointer;width:54px;">${v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code}</div>`;
               const pickerHtml = openParallelPicker===s.code ? editablePicker(s.code, v.parallel||'normal') : '';
-              return `<div>${cardHtml}${pickerHtml}</div>`;
+              return `<div class="${openParallelPicker===s.code?'duplicate-card-open':''}">${cardHtml}${pickerHtml}</div>`;
             }
             return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
           }).join('')}
@@ -945,19 +946,20 @@ async function renderWanted(main){
     .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
     .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code));
   const relevantRows = allRows.filter(r=>r.count>=threshold);
-  const rows = relevantRows.slice(0, 40);
+  const rows = relevantRows.slice(0, 12);
 
   document.getElementById('main').innerHTML = `
     <div class="panel">
       <h2>Most Wanted</h2>
       <p class="lead">Stickers at least ${threshold} people in the office are missing right now (out of ${activeMembers} who've imported). Ones you can supply are highlighted.</p>
+      ${activeMembers<5?`<div class="msg info">With only ${activeMembers} people in so far, early collections naturally overlap a lot — this list gets a lot more selective as more people join.</div>`:''}
       ${rows.length===0?'<p class="empty-note">Nothing stands out yet — this fills in once more people import their albums and overlap shows up.</p>':
       rows.map(r=>`
         <div class="search-result-row" style="${r.iHaveDupe?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 85%);border-color:var(--yellow-deep);':''}">
           <div>${r.code}${r.iHaveDupe?' <span class="badge-pill promo" style="background:var(--red);color:#fff;">YOU HAVE THIS</span>':''}</div>
           <div class="count">${r.count} people need it</div>
         </div>`).join('')}
-      ${relevantRows.length>40?`<p class="example" style="margin-top:14px;">Showing the top 40, out of ${relevantRows.length} stickers currently wanted by ${threshold}+ people. Ties are broken alphabetically — that's why it can look like it stops mid-team.</p>`:''}
+      ${relevantRows.length>12?`<p class="example" style="margin-top:14px;">Showing the top 12, out of ${relevantRows.length} stickers currently wanted by ${threshold}+ people.</p>`:''}
     </div>`;
 }
 
