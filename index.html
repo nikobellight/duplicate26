@@ -365,7 +365,7 @@ function randomSalt(){
   return Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-let authMode = 'join';
+let authMode = 'login';
 function renderAuth(){
   const isJoin = authMode === 'join';
   root.innerHTML = `
@@ -373,7 +373,7 @@ function renderAuth(){
     <div class="center-screen"><div class="card">
       ${BADGE26_SVG}
       <h2>${isJoin?'Welcome':'Log in'}</h2>
-      <p class="sub">${isJoin?`A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who in the office can complete it.`:'Welcome back — enter your pseudo and password.'}</p>
+      <p class="sub">${isJoin?`A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who in the office can complete it.`:`Welcome back to ${APP_NAME}'26 — the office's World Cup sticker trading board. Enter your pseudo and password.`}</p>
       <div class="field"><label>Pseudo</label><input type="text" id="authPseudo" placeholder="e.g. Nico"></div>
       <div class="field"><label>Password</label><input type="password" id="authPassword" placeholder="••••••••"></div>
       <button class="btn full" id="authBtn">${isJoin?`Join ${APP_NAME}'26`:'Log in'}</button>
