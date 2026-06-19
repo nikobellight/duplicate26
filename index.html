@@ -317,37 +317,71 @@ async function setStickerStatus(code, status, count){
   myCollection.set(code, {status, count});
 }
 
-/* ============================================================ JOIN (no login, just identification) ============================================================ */
+/* ============================================================ AUTH HELPERS (simple hashed password, no email) ============================================================ */
+async function hashPassword(password, salt){
+  const data = new TextEncoder().encode(password + ':' + salt);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function randomSalt(){
+  return Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+let authMode = 'join';
 function renderAuth(){
+  const isJoin = authMode === 'join';
   root.innerHTML = `
     <div class="topbar"><div class="wordmark"><h1>${APP_NAME}</h1><span class="tag">'26</span></div><div></div><div></div></div>
     <div class="center-screen"><div class="card">
       ${BADGE26_SVG}
-      <h2>Welcome</h2>
-      <p class="sub">A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who in the office can complete it.</p>
-      <div class="field"><label>Your name / pseudo</label><input type="text" id="authPseudo" placeholder="e.g. Nico"></div>
-      <div class="field"><label>Email</label><input type="email" id="authEmail" placeholder="you@company.com"></div>
-      <button class="btn full" id="authBtn">Join ${APP_NAME}'26</button>
+      <h2>${isJoin?'Welcome':'Log in'}</h2>
+      <p class="sub">${isJoin?`A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who in the office can complete it.`:'Welcome back — enter your pseudo and password.'}</p>
+      <div class="field"><label>Pseudo</label><input type="text" id="authPseudo" placeholder="e.g. Nico"></div>
+      <div class="field"><label>Password</label><input type="password" id="authPassword" placeholder="••••••••"></div>
+      <button class="btn full" id="authBtn">${isJoin?`Join ${APP_NAME}'26`:'Log in'}</button>
       <div id="authMsg"></div>
+      <p class="sub" style="margin:16px 0 0;text-align:center;">
+        ${isJoin?`Already have an account? <a href="#" id="toggleAuth">Log in</a>`:`New here? <a href="#" id="toggleAuth">Create an account</a>`}
+      </p>
     </div></div>`;
-  document.getElementById('authBtn').onclick = createProfileDirect;
+  document.getElementById('authBtn').onclick = isJoin ? handleJoin : handleLogin;
+  document.getElementById('toggleAuth').onclick = (e)=>{ e.preventDefault(); authMode = isJoin ? 'login' : 'join'; renderAuth(); };
 }
-async function createProfileDirect(){
+async function handleJoin(){
   const pseudo = document.getElementById('authPseudo').value.trim();
-  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
   const msg = document.getElementById('authMsg');
-  if (!pseudo || !email){ msg.innerHTML = `<div class="msg err">Please fill in both your name and your email.</div>`; return; }
+  if (!pseudo || !password){ msg.innerHTML = `<div class="msg err">Please fill in both fields.</div>`; return; }
+  if (password.length < 4){ msg.innerHTML = `<div class="msg err">Password should be at least 4 characters.</div>`; return; }
   const btn = document.getElementById('authBtn'); btn.disabled = true; btn.textContent = 'Joining…';
+  const salt = randomSalt();
+  const password_hash = await hashPassword(password, salt);
   const id = crypto.randomUUID();
-  const { error } = await sb.from('profiles').insert({ id, pseudo, email });
+  const { error } = await sb.from('profiles').insert({ id, pseudo, password_hash, salt });
   if (error){
     btn.disabled = false; btn.textContent = `Join ${APP_NAME}'26`;
-    msg.innerHTML = `<div class="msg err">${error.message.toLowerCase().includes('duplicate')?'That name is taken, try another.':error.message}</div>`;
+    msg.innerHTML = `<div class="msg err">${error.message.toLowerCase().includes('duplicate')?'That pseudo is taken, try another.':error.message}</div>`;
     return;
   }
   localStorage.setItem('my_profile_id', id);
-  profile = { id, pseudo, email };
+  profile = { id, pseudo };
   myCollection = new Map();
+  renderShell();
+}
+async function handleLogin(){
+  const pseudo = document.getElementById('authPseudo').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const msg = document.getElementById('authMsg');
+  if (!pseudo || !password){ msg.innerHTML = `<div class="msg err">Please fill in both fields.</div>`; return; }
+  const btn = document.getElementById('authBtn'); btn.disabled = true; btn.textContent = 'Logging in…';
+  const { data } = await sb.from('profiles').select('*').eq('pseudo', pseudo).maybeSingle();
+  btn.disabled = false; btn.textContent = 'Log in';
+  if (!data){ msg.innerHTML = `<div class="msg err">No account with that pseudo.</div>`; return; }
+  const hash = await hashPassword(password, data.salt);
+  if (hash !== data.password_hash){ msg.innerHTML = `<div class="msg err">Wrong password.</div>`; return; }
+  localStorage.setItem('my_profile_id', data.id);
+  profile = data;
+  await loadMyCollection();
   renderShell();
 }
 
@@ -367,6 +401,7 @@ function renderShell(){
         <button data-tab="import">Import</button>
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
+        <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
         <button data-tab="search" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Find a sticker</button>
         <button data-tab="members">Members</button>
       </nav>
@@ -389,6 +424,7 @@ function renderTab(){
   if (currentTab==='import') return renderImport(main);
   if (currentTab==='album') return renderAlbum(main);
   if (currentTab==='trade') return renderTradeBoard(main);
+  if (currentTab==='wanted') return renderWanted(main);
   if (currentTab==='search') return renderSearch(main);
   if (currentTab==='members') return renderMembers(main);
 }
@@ -547,14 +583,41 @@ async function renderTradeBoard(main){
         <div class="cols">
           <div><h4>You get from ${x.member.pseudo}</h4><div class="sticker-chips">${x.youGet.length? x.youGet.map(c=>`<span class="sticker get">${c}</span>`).join(''):'<span class="empty-note">Nothing right now</span>'}</div></div>
           <div><h4>You give to ${x.member.pseudo}</h4><div class="sticker-chips">${x.youGive.length? x.youGive.map(c=>`<span class="sticker give">${c}</span>`).join(''):'<span class="empty-note">Nothing right now</span>'}</div></div>
-        </div>
-        <div class="contact-line">📧 ${x.member.pseudo}: <a href="mailto:${x.member.email}?subject=${encodeURIComponent('WC26 sticker trade')}&body=${encodeURIComponent('Hey '+x.member.pseudo+', want to swap? I can give you: '+x.youGive.join(', ')+'. I need: '+x.youGet.join(', '))}">${x.member.email}</a></div>`;
+        </div>`;
       detail.style.display='block';
     };
   });
 }
 
-/* ============================================================ SEARCH ============================================================ */
+/* ============================================================ MOST WANTED ============================================================ */
+async function renderWanted(main){
+  main.innerHTML = `<div class="panel"><h2>Most Wanted</h2><div class="loading">Crunching the numbers…</div></div>`;
+  await loadAllMembers();
+  const demand = new Map(); // code -> count of people missing it
+  for (const m of allMembers){
+    for (const [code, v] of m.collection.entries()){
+      if (v.status === 'missing') demand.set(code, (demand.get(code)||0) + 1);
+    }
+  }
+  const rows = [...demand.entries()]
+    .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
+    .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code))
+    .slice(0, 40);
+
+  document.getElementById('main').innerHTML = `
+    <div class="panel">
+      <h2>Most Wanted</h2>
+      <p class="lead">The stickers the most people in the office are missing right now. Ones you can supply are highlighted.</p>
+      ${rows.length===0?'<p class="empty-note">No data yet — share the link so more people import their album!</p>':
+      rows.map(r=>`
+        <div class="search-result-row" style="${r.iHaveDupe?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 85%);border-color:var(--yellow-deep);':''}">
+          <div>${r.code}${r.iHaveDupe?' <span class="badge-pill promo" style="background:var(--red);color:#fff;">YOU HAVE THIS</span>':''}</div>
+          <div class="count">${r.count} ${r.count===1?'person needs':'people need'} it</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+
 async function renderSearch(main){
   main.innerHTML = `
     <div class="panel">
