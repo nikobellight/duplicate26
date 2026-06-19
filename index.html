@@ -414,6 +414,7 @@ function renderShell(){
         <button data-tab="import">Import</button>
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
+        <button data-tab="trades" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Trades</button>
         <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
         <button data-tab="members">Members</button>
         <button data-tab="search" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Find a sticker</button>
@@ -436,8 +437,8 @@ function renderTab(){
   const main = document.getElementById('main');
   if (currentTab==='import') return renderImport(main);
   if (currentTab==='album') return renderAlbum(main);
-  if (currentTab==='duplicates') return renderMyDuplicates(main);
   if (currentTab==='trade') return renderTradeBoard(main);
+  if (currentTab==='trades') return renderMyTrades(main);
   if (currentTab==='wanted') return renderWanted(main);
   if (currentTab==='search') return renderSearch(main);
   if (currentTab==='members') return renderMembers(main);
@@ -574,6 +575,16 @@ function renderGroups(filter=''){
 }
 
 /* ============================================================ TRADE BOARD ============================================================ */
+let tradeSelection = { give: new Set(), get: new Set() };
+function dupChips(collectionMap, selectedSet, side){
+  const dups = MASTER.filter(s => (collectionMap.get(s.code)||{}).status === 'duplicate');
+  if (dups.length === 0) return `<p class="empty-note">No duplicates.</p>`;
+  return `<div class="sticker-chips">${dups.map(s=>{
+    const v = collectionMap.get(s.code);
+    const sel = selectedSet.has(s.code);
+    return `<span class="sticker ${side==='give'?'give':'get'} trade-chip" data-side="${side}" data-code="${s.code}" style="cursor:pointer;${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+  }).join('')}</div>`;
+}
 async function renderTradeBoard(main){
   main.innerHTML = `<div class="panel"><h2>Trade Board</h2><div class="loading">Loading members…</div></div>`;
   await loadAllMembers();
@@ -593,7 +604,7 @@ async function renderTradeBoard(main){
   main2.innerHTML = `
     <div class="panel">
       <h2>Trade Board</h2>
-      <p class="lead">Sorted by best mutual matches. Click anyone to see exactly which stickers move.</p>
+      <p class="lead">Click anyone to see both your duplicate lists side by side. Click any sticker to add it to a proposal, then send it.</p>
       <div id="memberList"></div>
       ${matches.length===0?'<p class="empty-note">No one else has imported their album yet — share the link!</p>':''}
     </div>`;
@@ -602,7 +613,7 @@ async function renderTradeBoard(main){
     <div>
       <div class="member-row" data-id="${x.member.id}">
         <div class="name">${x.member.pseudo}</div>
-        <div class="match-counts"><span class="get">↓ ${x.youGet.length} you get</span><span class="give">↑ ${x.youGive.length} you give</span></div>
+        <div class="match-counts"><span class="get">↓ ${x.youGet.length} possible</span><span class="give">↑ ${x.youGive.length} possible</span></div>
       </div>
       <div class="detail" id="detail-${x.member.id}" style="display:none;"></div>
     </div>`).join('');
@@ -613,15 +624,144 @@ async function renderTradeBoard(main){
       const isOpen = detail.style.display==='block';
       list.querySelectorAll('.detail').forEach(d=>d.style.display='none');
       if (isOpen) return;
+      tradeSelection = { give: new Set(), get: new Set() };
       const x = matches.find(m=>m.member.id===id);
-      detail.innerHTML = `
-        <div class="cols">
-          <div><h4>You get from ${x.member.pseudo}</h4><div class="sticker-chips">${x.youGet.length? x.youGet.map(c=>`<span class="sticker get">${c}</span>`).join(''):'<span class="empty-note">Nothing right now</span>'}</div></div>
-          <div><h4>You give to ${x.member.pseudo}</h4><div class="sticker-chips">${x.youGive.length? x.youGive.map(c=>`<span class="sticker give">${c}</span>`).join(''):'<span class="empty-note">Nothing right now</span>'}</div></div>
-        </div>`;
+      x.youGet.forEach(c=>tradeSelection.get.add(c));
+      x.youGive.forEach(c=>tradeSelection.give.add(c));
+      renderTradeDetail(detail, x.member);
       detail.style.display='block';
     };
   });
+}
+function renderTradeDetail(detail, member){
+  detail.innerHTML = `
+    <div class="cols">
+      <div><h4>Your duplicates — click to offer</h4>${dupChips(myCollection, tradeSelection.give, 'give')}</div>
+      <div><h4>${member.pseudo}'s duplicates — click to request</h4>${dupChips(member.collection, tradeSelection.get, 'get')}</div>
+    </div>
+    <div style="margin-top:14px;font-size:13px;color:var(--mist);">
+      <strong>You give:</strong> ${[...tradeSelection.give].join(', ')||'none selected'}<br>
+      <strong>You get:</strong> ${[...tradeSelection.get].join(', ')||'none selected'}
+    </div>
+    <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(tradeSelection.give.size===0 && tradeSelection.get.size===0)?'disabled':''}>Send trade proposal</button>
+    <div id="proposalMsg"></div>`;
+  detail.querySelectorAll('.trade-chip').forEach(c=>{
+    c.onclick = ()=>{
+      const set = c.dataset.side==='give' ? tradeSelection.give : tradeSelection.get;
+      if (set.has(c.dataset.code)) set.delete(c.dataset.code); else set.add(c.dataset.code);
+      renderTradeDetail(detail, member);
+    };
+  });
+  const sendBtn = document.getElementById('sendProposalBtn');
+  if (sendBtn) sendBtn.onclick = async ()=>{
+    sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+    try{
+      await sendTradeProposal(member.id, [...tradeSelection.give], [...tradeSelection.get]);
+      document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Proposal sent to ${member.pseudo} — find it under "My Trades".</div>`;
+    }catch(e){
+      sendBtn.disabled = false; sendBtn.textContent = 'Send trade proposal';
+      document.getElementById('proposalMsg').innerHTML = `<div class="msg err">${e.message}</div>`;
+    }
+  };
+}
+
+/* ============================================================ TRADE PROPOSALS (data + transfer logic) ============================================================ */
+let myTrades = [];
+async function sendTradeProposal(toUserId, offerCodes, requestCodes){
+  const id = crypto.randomUUID();
+  const { error } = await sb.from('trade_proposals').insert({
+    id, from_user: profile.id, to_user: toUserId, offer_codes: offerCodes, request_codes: requestCodes, status: 'pending'
+  });
+  if (error) throw error;
+}
+async function loadMyTrades(){
+  const { data } = await sb.from('trade_proposals').select('*').or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`).order('created_at', {ascending:false});
+  myTrades = data || [];
+}
+async function transferCodes(giverId, receiverId, codes){
+  for (const code of codes){
+    const { data: giverRow } = await sb.from('collections').select('*').eq('user_id', giverId).eq('sticker_code', code).maybeSingle();
+    const { data: receiverRow } = await sb.from('collections').select('*').eq('user_id', receiverId).eq('sticker_code', code).maybeSingle();
+    if (giverRow && giverRow.status==='duplicate'){
+      const newCount = giverRow.duplicate_count - 1;
+      await sb.from('collections').update({ status: newCount>0?'duplicate':'have', duplicate_count: Math.max(newCount,0), updated_at:new Date().toISOString() }).eq('user_id', giverId).eq('sticker_code', code);
+    }
+    if (receiverRow){
+      let newStatus, newCount;
+      if (receiverRow.status==='missing'){ newStatus='have'; newCount=0; }
+      else if (receiverRow.status==='have'){ newStatus='duplicate'; newCount=1; }
+      else { newStatus='duplicate'; newCount=receiverRow.duplicate_count+1; }
+      await sb.from('collections').update({ status:newStatus, duplicate_count:newCount, updated_at:new Date().toISOString() }).eq('user_id', receiverId).eq('sticker_code', code);
+    } else {
+      await sb.from('collections').insert({ user_id:receiverId, sticker_code:code, status:'have', duplicate_count:0 });
+    }
+  }
+}
+async function handleAccept(tradeId){
+  const trade = myTrades.find(t=>t.id===tradeId);
+  if (!trade) return;
+  try{
+    await transferCodes(trade.from_user, profile.id, trade.offer_codes);
+    await transferCodes(profile.id, trade.from_user, trade.request_codes);
+    await sb.from('trade_proposals').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', tradeId);
+    await loadMyCollection();
+    renderTab();
+  }catch(e){ alert('Trade failed: '+e.message); }
+}
+async function handleRespond(tradeId, newStatus){
+  await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
+  renderTab();
+}
+
+/* ============================================================ MY TRADES ============================================================ */
+async function renderMyTrades(main){
+  main.innerHTML = `<div class="panel"><h2>My Trades</h2><div class="loading">Loading…</div></div>`;
+  await loadAllMembers();
+  await loadMyTrades();
+  const pseudoOf = id => (allMembers.find(m=>m.id===id)||{}).pseudo || 'someone';
+  const waitingOnYou = myTrades.filter(t=>t.status==='pending' && t.to_user===profile.id);
+  const sentByYou = myTrades.filter(t=>t.status==='pending' && t.from_user===profile.id);
+  const history = myTrades.filter(t=>t.status!=='pending').slice(0,20);
+
+  document.getElementById('main').innerHTML = `
+    <div class="panel">
+      <h2>My Trades</h2>
+      <p class="lead">Accept, decline, or cancel proposals here. Accepting updates both albums automatically.</p>
+      <h3 style="font-size:15px;margin:18px 0 8px;">Waiting on you (${waitingOnYou.length})</h3>
+      ${waitingOnYou.length===0?'<p class="empty-note">Nothing pending.</p>':waitingOnYou.map(t=>`
+        <div class="member-row" style="cursor:default;align-items:flex-start;">
+          <div>
+            <div class="name">${pseudoOf(t.from_user)} offers you</div>
+            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>`<span class="sticker get">${c}</span>`).join('')}</div>
+            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">in exchange for your:</div>
+            <div class="sticker-chips">${t.request_codes.map(c=>`<span class="sticker give">${c}</span>`).join('')}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <button class="btn" data-accept="${t.id}">Accept</button>
+            <button class="btn ghost" data-decline="${t.id}">Decline</button>
+          </div>
+        </div>`).join('')}
+      <h3 style="font-size:15px;margin:18px 0 8px;">Sent by you (${sentByYou.length})</h3>
+      ${sentByYou.length===0?'<p class="empty-note">Nothing sent.</p>':sentByYou.map(t=>`
+        <div class="member-row" style="cursor:default;align-items:flex-start;">
+          <div>
+            <div class="name">To ${pseudoOf(t.to_user)} — you give</div>
+            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>`<span class="sticker give">${c}</span>`).join('')}</div>
+            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">for their:</div>
+            <div class="sticker-chips">${t.request_codes.map(c=>`<span class="sticker get">${c}</span>`).join('')}</div>
+          </div>
+          <button class="btn ghost" data-cancel="${t.id}">Cancel</button>
+        </div>`).join('')}
+      <h3 style="font-size:15px;margin:18px 0 8px;">History</h3>
+      ${history.length===0?'<p class="empty-note">No completed trades yet.</p>':history.map(t=>`
+        <div class="search-result-row">
+          <div>${t.from_user===profile.id?'You → '+pseudoOf(t.to_user):pseudoOf(t.from_user)+' → you'}: ${t.offer_codes.join(', ')} ⇄ ${t.request_codes.join(', ')}</div>
+          <div class="count" style="text-transform:capitalize;">${t.status}</div>
+        </div>`).join('')}
+    </div>`;
+  document.querySelectorAll('[data-accept]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.accept));
+  document.querySelectorAll('[data-decline]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.decline,'declined'));
+  document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.cancel,'cancelled'));
 }
 
 /* ============================================================ MOST WANTED ============================================================ */
