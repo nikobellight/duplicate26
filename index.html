@@ -106,7 +106,7 @@
   .team-head .pct{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mist);min-width:38px;text-align:right;}
   .team-body{display:none;padding:14px 16px;background:var(--paper);}
   .team-body.open{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:8px;}
-  .cell{aspect-ratio:2/3;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:700;cursor:pointer;border:1.5px solid var(--line-strong);position:relative;transition:transform .08s ease;}
+  .cell{aspect-ratio:2/3;border-radius:5px;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:-0.02em;font-weight:700;cursor:pointer;border:1.5px solid var(--line-strong);position:relative;transition:transform .08s ease;}
   .cell:hover{transform:translateY(-2px);}
   .cell.s-have{background:var(--paper);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,0.06);}
   .cell.s-missing{background:var(--paper-soft);color:var(--mist-soft);border-style:dashed;}
@@ -402,8 +402,8 @@ function renderShell(){
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
         <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
-        <button data-tab="search" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Find a sticker</button>
         <button data-tab="members">Members</button>
+        <button data-tab="search" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Find a sticker</button>
       </nav>
       <div class="who">
         ${hasData?`<span>Complete: <span class="pct">${pct}%</span></span>`:''}
@@ -423,6 +423,7 @@ function renderTab(){
   const main = document.getElementById('main');
   if (currentTab==='import') return renderImport(main);
   if (currentTab==='album') return renderAlbum(main);
+  if (currentTab==='duplicates') return renderMyDuplicates(main);
   if (currentTab==='trade') return renderTradeBoard(main);
   if (currentTab==='wanted') return renderWanted(main);
   if (currentTab==='search') return renderSearch(main);
@@ -455,7 +456,7 @@ function renderImport(main){
         <div class="stat"><div class="num">${have}</div><div class="lbl">Stickers owned</div></div>
         <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
         <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
-        <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Extra copies to trade</div></div>
+        <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
       </div>
       ${result.unmatched.length? `<div class="msg err">Could not read ${result.unmatched.length} entr${result.unmatched.length>1?'ies':'y'}: ${result.unmatched.slice(0,10).join(', ')}${result.unmatched.length>10?'…':''}</div>`:''}
       <button class="btn full" id="confirmImportBtn" style="margin-top:14px;">Save this to my album</button>`;
@@ -468,6 +469,7 @@ function renderImport(main){
 }
 
 /* ============================================================ MY ALBUM ============================================================ */
+let statusFilter = 'all';
 function renderAlbum(main){
   let have=0,missing=0,dup=0,dupCopies=0;
   for (const v of myCollection.values()){
@@ -481,18 +483,28 @@ function renderAlbum(main){
         <div class="stat"><div class="num">${completionPct()}%</div><div class="lbl">Complete</div></div>
         <div class="stat"><div class="num">${have+dup}</div><div class="lbl">Owned</div></div>
         <div class="stat"><div class="num">${missing}</div><div class="lbl">Missing</div></div>
-        <div class="stat"><div class="num">${dupCopies}</div><div class="lbl">Spare copies</div></div>
+        <div class="stat"><div class="num">${dupCopies}</div><div class="lbl">Duplicate copies</div></div>
       </div>
       <div class="legend">
         <span><span class="sw" style="background:var(--paper);border:1px solid var(--line-strong)"></span>Have</span>
         <span><span class="sw" style="background:var(--paper-soft);border:1.5px dashed var(--mist-soft)"></span>Missing</span>
         <span><span class="sw" style="background:var(--yellow)"></span>Duplicate</span>
       </div>
-      <div class="filter-row"><input type="text" id="teamFilter" placeholder="Jump to a team or code (e.g. France, FRA, FRA17)…"></div>
+      <div class="filter-row">
+        <input type="text" id="teamFilter" placeholder="Jump to a team or code (e.g. France, FRA, FRA17)…">
+        <button class="btn ghost" data-status="all" style="padding:8px 14px;">All</button>
+        <button class="btn ghost" data-status="duplicate" style="padding:8px 14px;">My duplicates</button>
+        <button class="btn ghost" data-status="missing" style="padding:8px 14px;">Missing only</button>
+      </div>
       <div id="groupsHolder"></div>
     </div>`;
   renderGroups();
   document.getElementById('teamFilter').oninput = (e)=>renderGroups(e.target.value.trim().toLowerCase());
+  document.querySelectorAll('[data-status]').forEach(b=>{
+    b.style.background = b.dataset.status===statusFilter ? 'var(--ink)' : 'transparent';
+    b.style.color = b.dataset.status===statusFilter ? '#fff' : 'var(--ink)';
+    b.onclick = ()=>{ statusFilter = b.dataset.status; renderAlbum(main); };
+  });
 }
 function renderGroups(filter=''){
   const holder = document.getElementById('groupsHolder');
@@ -507,22 +519,28 @@ function renderGroups(filter=''){
     const total = stickers.length;
     let owned=0; stickers.forEach(s=>{ const v=myCollection.get(s.code); if (v && v.status!=='missing') owned++; });
     const pct = Math.round(100*owned/total);
-    const isOpen = openTeams.has(g) || (filter && filter.length>0);
+
+    let visibleStickers = stickers;
+    if (statusFilter !== 'all'){
+      visibleStickers = stickers.filter(s => (myCollection.get(s.code)||{status:'have'}).status === statusFilter);
+      if (visibleStickers.length === 0) continue;
+    }
+    const isOpen = openTeams.has(g) || (filter && filter.length>0) || statusFilter !== 'all';
     html += `
       <div class="team-group" data-group="${g}">
         <div class="team-head" data-toggle="${g}">
           <div class="left">${teamLabel(g)}<span>${name}</span></div>
-          <div style="display:flex;align-items:center;gap:10px;"><div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div><div class="pct">${owned}/${total}</div></div>
+          <div style="display:flex;align-items:center;gap:10px;">${pct===100?`<span class="badge-pill" style="background:var(--green);color:#fff;">✓ COMPLETE</span>`:`<div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>`}<div class="pct">${owned}/${total}</div></div>
         </div>
         <div class="team-body ${isOpen?'open':''}">
-          ${stickers.map(s=>{
+          ${visibleStickers.map(s=>{
             const v = myCollection.get(s.code) || {status:'have',count:0};
-            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code.replace(g,'')}</div>`;
+            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code}</div>`;
           }).join('')}
         </div>
       </div>`;
   }
-  holder.innerHTML = html || `<p class="empty-note">No team matches "${filter}".</p>`;
+  holder.innerHTML = html || `<p class="empty-note">${statusFilter!=='all'?'Nothing matches that filter.':`No team matches "${filter}".`}</p>`;
   holder.querySelectorAll('.team-head').forEach(h=>{
     h.onclick = ()=>{ const g = h.dataset.toggle; if (openTeams.has(g)) openTeams.delete(g); else openTeams.add(g); renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase()); };
   });
@@ -603,10 +621,10 @@ async function renderWanted(main){
       if (v.status === 'missing') demand.set(code, (demand.get(code)||0) + 1);
     }
   }
-  const rows = [...demand.entries()]
+  const allRows = [...demand.entries()]
     .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
-    .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code))
-    .slice(0, 40);
+    .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code));
+  const rows = allRows.slice(0, 40);
 
   document.getElementById('main').innerHTML = `
     <div class="panel">
@@ -618,6 +636,7 @@ async function renderWanted(main){
           <div>${r.code}${r.iHaveDupe?' <span class="badge-pill promo" style="background:var(--red);color:#fff;">YOU HAVE THIS</span>':''}</div>
           <div class="count">${r.count} ${r.count===1?'person needs':'people need'} it</div>
         </div>`).join('')}
+      ${allRows.length>40?`<p class="example" style="margin-top:14px;">Showing the top 40 most-needed stickers, out of ${allRows.length} total currently missing by someone. Ties are broken alphabetically — that's why it can look like it stops mid-team.</p>`:''}
     </div>`;
 }
 
@@ -626,7 +645,7 @@ async function renderSearch(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Find a sticker</h2>
-      <p class="lead">Type a code (e.g. FRA17) to see who in the office has a spare.</p>
+      <p class="lead">Type a code (e.g. FRA17) to see who in the office has a duplicate.</p>
       <input type="text" id="searchInput" placeholder="e.g. FRA17, MEX3, FWC9…">
       <div id="searchResults" style="margin-top:18px;"></div>
     </div>`;
@@ -640,8 +659,8 @@ async function renderSearch(main){
       const v = m.collection.get(q);
       return v && v.status==='duplicate' ? {pseudo:m.pseudo, count:v.count} : null;
     }).filter(Boolean);
-    if (holders.length===0){ out.innerHTML = `<p class="empty-note">No one has a spare ${q} right now.</p>`; return; }
-    out.innerHTML = holders.map(h=>`<div class="search-result-row"><div>${h.pseudo}</div><div class="count">${h.count} spare</div></div>`).join('');
+    if (holders.length===0){ out.innerHTML = `<p class="empty-note">No one has a duplicate ${q} right now.</p>`; return; }
+    out.innerHTML = holders.map(h=>`<div class="search-result-row"><div>${h.pseudo}</div><div class="count">${h.count} duplicate${h.count>1?'s':''}</div></div>`).join('');
   };
 }
 
@@ -659,7 +678,7 @@ async function renderMembers(main){
     <div class="panel">
       <h2>Members (${rows.length})</h2>
       <table class="members-table">
-        <thead><tr><th>Name</th><th>Complete</th><th>Spares</th></tr></thead>
+        <thead><tr><th>Name</th><th>Complete</th><th>Duplicates</th></tr></thead>
         <tbody>${rows.map(r=>`<tr><td>${r.pseudo}${r.isMe?' (you)':''}</td><td class="mono">${r.pct}%</td><td class="mono">${r.dup}</td></tr>`).join('')}</tbody>
       </table>
     </div>`;
