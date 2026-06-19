@@ -129,8 +129,8 @@
   .sticker{background:var(--paper);font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;padding:7px 10px;border-radius:4px;border:1.5px solid var(--line-strong);}
   .sticker.give{background:var(--red-soft);color:var(--red-deep);border-color:#F4B8B4;}
   .sticker.get{background:var(--blue-soft);color:var(--blue-deep);border-color:#AECBE9;}
-  .parallel-picker{display:flex;align-items:center;gap:4px;margin-top:5px;}
-  .parallel-dot{width:15px;height:15px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
+  .parallel-picker{display:flex;align-items:center;gap:7px;margin-top:7px;padding:6px;background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;}
+  .parallel-dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
   .parallel-dot.active{border-color:var(--ink);box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px var(--ink);}
   .parallel-dot.tag-normal{background:#fff;}
   .parallel-dot.tag-blue{background:var(--blue);}
@@ -502,6 +502,7 @@ function renderImport(main){
 
 /* ============================================================ MY ALBUM ============================================================ */
 let statusFilter = 'all';
+let openParallelPicker = null;
 function renderAlbum(main){
   let have=0,missing=0,dup=0,dupCopies=0;
   for (const v of myCollection.values()){
@@ -510,7 +511,7 @@ function renderAlbum(main){
   main.innerHTML = `
     <div class="panel">
       <h2>My Album</h2>
-      <p class="lead">Click any sticker to update it by hand — useful right after opening a new pack.</p>
+      <p class="lead">Click any sticker to update it by hand — useful right after opening a new pack. Got a special parallel color (blue, red, purple, green, black)? Switch to "My duplicates" below to tag it.</p>
       <div class="stat-row">
         <div class="stat"><div class="num">${completionPct()}%</div><div class="lbl">Complete</div></div>
         <div class="stat"><div class="num">${have+dup}</div><div class="lbl">Owned</div></div>
@@ -535,7 +536,7 @@ function renderAlbum(main){
   document.querySelectorAll('[data-status]').forEach(b=>{
     b.style.background = b.dataset.status===statusFilter ? 'var(--ink)' : 'transparent';
     b.style.color = b.dataset.status===statusFilter ? '#fff' : 'var(--ink)';
-    b.onclick = ()=>{ statusFilter = b.dataset.status; renderAlbum(main); };
+    b.onclick = ()=>{ statusFilter = b.dataset.status; openParallelPicker = null; renderAlbum(main); };
   });
 }
 function renderGroups(filter=''){
@@ -567,8 +568,14 @@ function renderGroups(filter=''){
         <div class="team-body ${isOpen?'open':''}">
           ${visibleStickers.map(s=>{
             const v = myCollection.get(s.code) || {status:'have',count:0,parallel:'normal'};
-            const cellHtml = `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
-            return statusFilter==='duplicate' ? `<div>${cellHtml}${editablePicker(s.code, v.parallel||'normal')}</div>` : cellHtml;
+            if (statusFilter==='duplicate'){
+              const tagged = v.parallel && v.parallel!=='normal';
+              const cardStyle = tagged ? parallelChipStyle(v.parallel) : '';
+              const cardHtml = `<div class="cell ${tagged?'':'s-have'}" data-code="${s.code}" data-picker-toggle="${s.code}" style="${cardStyle}cursor:pointer;">${v.count>1?`<span class="badge">${v.count}x</span>`:''}${s.code}</div>`;
+              const pickerHtml = openParallelPicker===s.code ? editablePicker(s.code, v.parallel||'normal') : '';
+              return `<div>${cardHtml}${pickerHtml}</div>`;
+            }
+            return `<div class="cell s-${v.status}" data-code="${s.code}">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
           }).join('')}
         </div>
       </div>`;
@@ -577,27 +584,38 @@ function renderGroups(filter=''){
   holder.querySelectorAll('.team-head').forEach(h=>{
     h.onclick = ()=>{ const g = h.dataset.toggle; if (openTeams.has(g)) openTeams.delete(g); else openTeams.add(g); renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase()); };
   });
+  holder.querySelectorAll('[data-picker-toggle]').forEach(c=>{
+    c.onclick = (ev)=>{
+      ev.stopPropagation();
+      const code = c.dataset.pickerToggle;
+      openParallelPicker = openParallelPicker===code ? null : code;
+      renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase());
+    };
+  });
   holder.querySelectorAll('[data-tag-code]').forEach(d=>{
     d.onclick = async (ev)=>{
       ev.stopPropagation();
       await setStickerParallel(d.dataset.tagCode, d.dataset.tagValue);
+      openParallelPicker = null;
       renderGroups(document.getElementById('teamFilter').value.trim().toLowerCase());
     };
   });
-  holder.querySelectorAll('.cell').forEach(c=>{
-    c.onclick = async (ev)=>{
-      ev.stopPropagation();
-      const code = c.dataset.code;
-      const cur = myCollection.get(code) || {status:'have',count:0,parallel:'normal'};
-      let next;
-      if (cur.status==='have') next = {status:'missing', count:0, parallel:'normal'};
-      else if (cur.status==='missing') next = {status:'duplicate', count:1, parallel:'normal'};
-      else if (cur.status==='duplicate' && cur.count<5) next = {status:'duplicate', count:cur.count+1, parallel:cur.parallel||'normal'};
-      else next = {status:'have', count:0, parallel:'normal'};
-      await setStickerStatus(code, next.status, next.count, next.parallel);
-      renderAlbum(document.getElementById('main'));
-    };
-  });
+  if (statusFilter !== 'duplicate'){
+    holder.querySelectorAll('.cell').forEach(c=>{
+      c.onclick = async (ev)=>{
+        ev.stopPropagation();
+        const code = c.dataset.code;
+        const cur = myCollection.get(code) || {status:'have',count:0,parallel:'normal'};
+        let next;
+        if (cur.status==='have') next = {status:'missing', count:0, parallel:'normal'};
+        else if (cur.status==='missing') next = {status:'duplicate', count:1, parallel:'normal'};
+        else if (cur.status==='duplicate' && cur.count<5) next = {status:'duplicate', count:cur.count+1, parallel:cur.parallel||'normal'};
+        else next = {status:'have', count:0, parallel:'normal'};
+        await setStickerStatus(code, next.status, next.count, next.parallel);
+        renderAlbum(document.getElementById('main'));
+      };
+    });
+  }
 }
 
 /* ============================================================ TRADE BOARD ============================================================ */
@@ -648,7 +666,7 @@ async function renderTradeBoard(main){
     <div class="panel" id="builderPanel" style="display:none;position:sticky;top:66px;z-index:10;"></div>
     <div class="panel">
       <h2>Trade Board</h2>
-      <p class="lead">Click anyone below — the trade builder opens above, grouped by team so it's easy to compare.</p>
+      <p class="lead">Click anyone below — the trade builder opens above, grouped by team so it's easy to compare. Each "Send" creates one separate deal — pick everything for that one trade, send it, then start fresh for a different deal (with this person or anyone else).</p>
       <div id="memberList"></div>
       ${matches.length===0?'<p class="empty-note">No one else has imported their album yet — share the link!</p>':''}
     </div>`;
