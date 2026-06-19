@@ -131,7 +131,8 @@
   .sticker.get{background:var(--blue-soft);color:var(--blue-deep);border-color:#AECBE9;}
   .parallel-picker{display:flex;align-items:center;gap:7px;margin-top:7px;padding:6px;background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;}
   .parallel-dot{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid var(--line-strong);display:inline-block;flex-shrink:0;}
-  .parallel-rect{width:38px;height:32px;border-radius:6px;cursor:pointer;border:2px solid var(--line-strong);flex-shrink:0;padding:0;font:inherit;}
+  .parallel-rect{width:38px;height:32px;border-radius:6px;cursor:pointer;border:2px solid var(--line-strong);flex-shrink:0;padding:0;font:inherit;appearance:none;-webkit-appearance:none;outline:none;}
+  .parallel-rect:hover{border-color:var(--ink);transform:translateY(-1px);}
   .parallel-rect.active{border-color:var(--ink);border-width:3px;}
   .parallel-rect.tag-normal{background:#fff;}
   .parallel-rect.tag-blue{background:var(--blue);}
@@ -828,12 +829,16 @@ async function transferCodes(giverId, receiverId, rawCodes){
   }
 }
 async function handleAccept(tradeId){
+  await sb.from('trade_proposals').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', tradeId);
+  renderTab();
+}
+async function handleComplete(tradeId){
   const trade = myTrades.find(t=>t.id===tradeId);
   if (!trade) return;
   try{
-    await transferCodes(trade.from_user, profile.id, trade.offer_codes);
-    await transferCodes(profile.id, trade.from_user, trade.request_codes);
-    await sb.from('trade_proposals').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', tradeId);
+    await transferCodes(trade.from_user, trade.to_user, trade.offer_codes);
+    await transferCodes(trade.to_user, trade.from_user, trade.request_codes);
+    await sb.from('trade_proposals').update({ status:'completed', updated_at:new Date().toISOString() }).eq('id', tradeId);
     await loadMyCollection();
     renderTab();
   }catch(e){ alert('Trade failed: '+e.message); }
@@ -851,12 +856,13 @@ async function renderMyTrades(main){
   const pseudoOf = id => (allMembers.find(m=>m.id===id)||{}).pseudo || 'someone';
   const waitingOnYou = myTrades.filter(t=>t.status==='pending' && t.to_user===profile.id);
   const sentByYou = myTrades.filter(t=>t.status==='pending' && t.from_user===profile.id);
-  const history = myTrades.filter(t=>t.status!=='pending').slice(0,20);
+  const accepted = myTrades.filter(t=>t.status==='accepted');
+  const history = myTrades.filter(t=>!['pending','accepted'].includes(t.status)).slice(0,20);
 
   document.getElementById('main').innerHTML = `
     <div class="panel">
       <h2>My Trades</h2>
-      <p class="lead">Accept, decline, or cancel proposals here. Accepting updates both albums automatically.</p>
+      <p class="lead">Accept just means you agree — nothing changes in either album until someone hits "Deal done" below, once the stickers have actually changed hands.</p>
       <h3 style="font-size:15px;margin:18px 0 8px;">Waiting on you (${waitingOnYou.length})</h3>
       ${waitingOnYou.length===0?'<p class="empty-note">Nothing pending.</p>':waitingOnYou.map(t=>`
         <div class="member-row" style="cursor:default;align-items:flex-start;">
@@ -882,16 +888,41 @@ async function renderMyTrades(main){
           </div>
           <button class="btn ghost" data-cancel="${t.id}">Cancel</button>
         </div>`).join('')}
+      <h3 style="font-size:15px;margin:18px 0 8px;">Accepted — not applied yet (${accepted.length})</h3>
+      ${accepted.length===0?'<p class="empty-note">Nothing here. Trades land here once accepted, and stay until someone confirms the swap actually happened.</p>':accepted.map(t=>{
+        const otherId = t.from_user===profile.id ? t.to_user : t.from_user;
+        const youGive = t.from_user===profile.id ? t.offer_codes : t.request_codes;
+        const youGet = t.from_user===profile.id ? t.request_codes : t.offer_codes;
+        return `
+        <div class="member-row" style="cursor:default;align-items:flex-start;">
+          <div>
+            <div class="name">With ${pseudoOf(otherId)} — you give</div>
+            <div class="sticker-chips" style="margin-top:6px;">${youGive.map(c=>tradeChip(c,'give')).join('')}</div>
+            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">you get:</div>
+            <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
+          </div>
+          <button class="btn" data-complete="${t.id}">Deal done ✓</button>
+        </div>`;
+      }).join('')}
       <h3 style="font-size:15px;margin:18px 0 8px;">History</h3>
-      ${history.length===0?'<p class="empty-note">No completed trades yet.</p>':history.map(t=>`
-        <div class="search-result-row">
-          <div>${t.from_user===profile.id?'You → '+pseudoOf(t.to_user):pseudoOf(t.from_user)+' → you'}: ${t.offer_codes.join(', ')} ⇄ ${t.request_codes.join(', ')}</div>
+      ${history.length===0?'<p class="empty-note">No finished trades yet.</p>':history.map(t=>{
+        const sent = t.from_user===profile.id;
+        return `
+        <div class="member-row" style="cursor:default;align-items:flex-start;">
+          <div>
+            <div class="name"><span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>&nbsp; ${sent?'To':'From'} ${pseudoOf(sent?t.to_user:t.from_user)}</div>
+            <div class="sticker-chips" style="margin-top:6px;">${(sent?t.offer_codes:t.request_codes).map(c=>tradeChip(c, sent?'give':'get')).join('')}</div>
+            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">⇄</div>
+            <div class="sticker-chips">${(sent?t.request_codes:t.offer_codes).map(c=>tradeChip(c, sent?'get':'give')).join('')}</div>
+          </div>
           <div class="count" style="text-transform:capitalize;">${t.status}</div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
   document.querySelectorAll('[data-accept]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.accept));
   document.querySelectorAll('[data-decline]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.decline,'declined'));
   document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.cancel,'cancelled'));
+  document.querySelectorAll('[data-complete]').forEach(b=>b.onclick=()=>handleComplete(b.dataset.complete));
 }
 
 /* ============================================================ MOST WANTED ============================================================ */
