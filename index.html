@@ -238,9 +238,9 @@ const MASTER_BY_CODE = new Map(MASTER.map(s=>[s.code,s]));
 const GROUPS = ['FWC','CC',...TEAMS];
 
 /* ============================================================ PARSER ============================================================ */
-function parseExport(text){
+function parseExport(text, forceContext){
   const lines = text.split('\n');
-  let context = 'missing';
+  let context = forceContext || 'missing';
   const missing = new Set();
   const duplicates = {};
   const unmatched = [];
@@ -248,8 +248,8 @@ function parseExport(text){
     const line = raw.trim();
     if (!line) continue;
     const lower = line.toLowerCase();
-    if (lower.includes('duplicate')) { context = 'duplicate'; continue; }
-    if (lower.includes('missing')) { context = 'missing'; continue; }
+    if (!forceContext && lower.includes('duplicate')) { context = 'duplicate'; continue; }
+    if (!forceContext && lower.includes('missing')) { context = 'missing'; continue; }
     const m = line.match(/^([A-Za-z0-9]{2,4}):\s*(.+)$/);
     if (!m) continue;
     const prefix = m[1].toUpperCase();
@@ -339,8 +339,27 @@ async function loadAllMembers(){
   });
   allMembers = [...byUser.values()];
 }
-async function saveCollection(missing, duplicates){
-  const map = buildCollectionMap(missing, duplicates);
+async function saveCollection(missing, duplicates, mode='both'){
+  let map;
+  if (mode==='both'){
+    map = buildCollectionMap(missing, duplicates);
+  } else if (mode==='missing-only'){
+    map = new Map();
+    for (const s of MASTER){
+      const existing = myCollection.get(s.code) || {status:'have', count:0, parallel:'normal'};
+      if (existing.status==='duplicate') map.set(s.code, existing);
+      else if (missing.includes(s.code)) map.set(s.code, {status:'missing', count:0, parallel:'normal'});
+      else map.set(s.code, {status:'have', count:0, parallel:'normal'});
+    }
+  } else { // duplicates-only
+    map = new Map();
+    for (const s of MASTER){
+      const existing = myCollection.get(s.code) || {status:'have', count:0, parallel:'normal'};
+      if (duplicates[s.code]) map.set(s.code, {status:'duplicate', count:duplicates[s.code], parallel: existing.status==='duplicate' ? existing.parallel : 'normal'});
+      else if (existing.status==='missing') map.set(s.code, existing);
+      else map.set(s.code, {status:'have', count:0, parallel:'normal'});
+    }
+  }
   await sb.from('collections').delete().eq('user_id', profile.id);
   const rows = [];
   for (const [code, v] of map.entries()) rows.push({ user_id:profile.id, sticker_code:code, status:v.status, duplicate_count:v.count, parallel:v.parallel||'normal' });
@@ -471,36 +490,73 @@ function renderImport(main){
     <div class="panel">
       <h2>Import from Sticker Album 2026</h2>
       <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.</p>
+      <div style="margin-bottom:16px;">
+        <label>What are you updating?</label>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-size:13.5px;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="both" checked> Both lists (full replace)</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="missing-only"> Just my missing list</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="duplicates-only"> Just my duplicates</label>
+        </div>
+      </div>
       <label>Missing stickers list</label>
       <textarea class="import-box" id="importMissing" placeholder="Paste your MISSING stickers export here…" style="min-height:140px;"></textarea>
       <div style="height:14px;"></div>
       <label>Duplicate stickers list</label>
       <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
-      <div class="example">Re-pasting later replaces your saved album with the new export — handy after opening new packs.</div>
+      <div class="example">"Both lists" replaces your whole album — paste the complete current export from the app. "Just my missing" or "Just my duplicates" only touch that one category and leave the other exactly as it is.</div>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
-    const text = document.getElementById('importMissing').value + '\n' + document.getElementById('importDuplicates').value;
+    const mode = document.querySelector('input[name="updateMode"]:checked').value;
+    let text;
+    if (mode==='missing-only') text = document.getElementById('importMissing').value;
+    else if (mode==='duplicates-only') text = document.getElementById('importDuplicates').value;
+    else text = document.getElementById('importMissing').value + '\n' + document.getElementById('importDuplicates').value;
     const result = parseExport(text);
-    const have = MASTER.length - result.missing.length;
+    const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
+    const existingMissingCount = [...myCollection.values()].filter(v=>v.status==='missing').length;
     const dupTypes = Object.keys(result.duplicates).length;
     const dupTotal = Object.values(result.duplicates).reduce((a,b)=>a+b,0);
-    const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
-    const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code) && !result.duplicates[code]);
+
+    let statsHtml, warningHtml = '';
+    if (mode==='both'){
+      const have = MASTER.length - result.missing.length;
+      const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
+      const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code) && !result.duplicates[code]);
+      statsHtml = `
+        <div class="stat-row">
+          <div class="stat"><div class="num">${have}</div><div class="lbl">Stickers owned</div></div>
+          <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
+          <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
+          <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
+        </div>`;
+      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before (e.g. ${noLongerMissing.slice(0,6).join(', ')}${noLongerMissing.length>6?'…':''}) aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned.</div>`;
+    } else if (mode==='missing-only'){
+      const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
+      const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code));
+      statsHtml = `
+        <div class="stat-row">
+          <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing in this paste</div></div>
+          <div class="stat"><div class="num">${existingDupTypes}</div><div class="lbl">Duplicates preserved</div></div>
+        </div>`;
+      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned. Your duplicates won't be touched either way.</div>`;
+    } else {
+      statsHtml = `
+        <div class="stat-row">
+          <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types in this paste</div></div>
+          <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies in this paste</div></div>
+          <div class="stat"><div class="num">${existingMissingCount}</div><div class="lbl">Missing preserved</div></div>
+        </div>`;
+    }
     document.getElementById('previewArea').innerHTML = `
-      <div class="stat-row">
-        <div class="stat"><div class="num">${have}</div><div class="lbl">Stickers owned</div></div>
-        <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
-        <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
-        <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
-      </div>
+      ${statsHtml}
       ${result.unmatched.length? `<div class="msg err">Could not read ${result.unmatched.length} entr${result.unmatched.length>1?'ies':'y'}: ${result.unmatched.slice(0,10).join(', ')}${result.unmatched.length>10?'…':''}</div>`:''}
-      ${noLongerMissing.length? `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before (e.g. ${noLongerMissing.slice(0,6).join(', ')}${noLongerMissing.length>6?'…':''}) aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned. Make sure you copied your full, current missing list from the app — not a partial one — before saving.</div>`:''}
+      ${warningHtml}
       <button class="btn full" id="confirmImportBtn" style="margin-top:14px;">Save this to my album</button>`;
     document.getElementById('confirmImportBtn').onclick = async ()=>{
       const b = document.getElementById('confirmImportBtn'); b.disabled=true; b.textContent='Saving…';
-      try{ await saveCollection(result.missing, result.duplicates); currentTab='album'; renderShell(); }
+      try{ await saveCollection(result.missing, result.duplicates, mode); currentTab='album'; renderShell(); }
       catch(e){ b.disabled=false; b.textContent='Save this to my album'; alert('Save failed: '+e.message); }
     };
   };
