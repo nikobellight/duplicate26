@@ -868,6 +868,7 @@ function renderTradeBuilder(){
       tradeSelection = { give: new Set(), get: new Set() };
       renderTradeBuilder();
       document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Deal ${sentDealsThisSession.length} sent to ${sentPseudo} as its own separate proposal — see the log above, and "My Trades" for the full record.</div>`;
+      if (selectedTradeMember) renderTradeBoardHistory(selectedTradeMember);
     }catch(e){
       sendBtn.disabled = false; sendBtn.textContent = 'Send trade proposal';
       document.getElementById('proposalMsg').innerHTML = `<div class="msg err">${e.message}</div>`;
