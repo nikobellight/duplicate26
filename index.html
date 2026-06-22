@@ -489,69 +489,61 @@ function renderImport(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Import from Sticker Album 2026</h2>
-      <p class="lead">Open the MoovTech app, share each list separately, and paste them in the matching box below.</p>
-      <div style="margin-bottom:16px;">
-        <label>What are you updating?</label>
-        <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:6px;font-size:13.5px;">
-          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="both" checked> Both lists (full replace)</label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="missing-only"> Just my missing list</label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--ink);"><input type="radio" name="updateMode" value="duplicates-only"> Just my duplicates</label>
-        </div>
-      </div>
+      <p class="lead">Paste one or both lists from the MoovTech app — whichever boxes you fill in get updated, the ones you leave blank stay untouched.</p>
       <label>Missing stickers list</label>
       <textarea class="import-box" id="importMissing" placeholder="Paste your MISSING stickers export here…" style="min-height:140px;"></textarea>
       <div style="height:14px;"></div>
       <label>Duplicate stickers list</label>
       <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
-      <div class="example">"Both lists" replaces your whole album — paste the complete current export from the app. "Just my missing" or "Just my duplicates" only touch that one category and leave the other exactly as it is.</div>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
-    const mode = document.querySelector('input[name="updateMode"]:checked').value;
-    let text;
-    if (mode==='missing-only') text = document.getElementById('importMissing').value;
-    else if (mode==='duplicates-only') text = document.getElementById('importDuplicates').value;
-    else text = document.getElementById('importMissing').value + '\n' + document.getElementById('importDuplicates').value;
+    const missingText = document.getElementById('importMissing').value.trim();
+    const dupText = document.getElementById('importDuplicates').value.trim();
+    const hasMissing = missingText.length > 0;
+    const hasDup = dupText.length > 0;
+    if (!hasMissing && !hasDup){
+      document.getElementById('previewArea').innerHTML = `<div class="msg err">Paste at least one list before parsing.</div>`;
+      return;
+    }
+    const mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
+    const text = missingText + '\n' + dupText;
     const result = parseExport(text);
     const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
     const existingMissingCount = [...myCollection.values()].filter(v=>v.status==='missing').length;
     const dupTypes = Object.keys(result.duplicates).length;
     const dupTotal = Object.values(result.duplicates).reduce((a,b)=>a+b,0);
-
-    let statsHtml, warningHtml = '';
+    let statsHtml = '', warningHtml = '';
     if (mode==='both'){
       const have = MASTER.length - result.missing.length;
-      const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
+      const previouslyMissing = [...myCollection.entries()].filter(([,v])=>v.status==='missing').map(([code])=>code);
       const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code) && !result.duplicates[code]);
-      statsHtml = `
-        <div class="stat-row">
-          <div class="stat"><div class="num">${have}</div><div class="lbl">Stickers owned</div></div>
-          <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
-          <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
-          <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
-        </div>`;
-      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before (e.g. ${noLongerMissing.slice(0,6).join(', ')}${noLongerMissing.length>6?'…':''}) aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned.</div>`;
+      statsHtml = `<div class="stat-row">
+        <div class="stat"><div class="num">${have}</div><div class="lbl">Owned</div></div>
+        <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
+        <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
+        <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
+      </div>`;
+      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} previously missing (e.g. ${noLongerMissing.slice(0,6).join(', ')}${noLongerMissing.length>6?'…':''}) aren't in this paste — saving will mark ${noLongerMissing.length>1?'them':'it'} as owned.</div>`;
     } else if (mode==='missing-only'){
-      const previouslyMissing = [...myCollection.entries()].filter(([code,v])=>v.status==='missing').map(([code])=>code);
+      const previouslyMissing = [...myCollection.entries()].filter(([,v])=>v.status==='missing').map(([code])=>code);
       const noLongerMissing = previouslyMissing.filter(code => !result.missing.includes(code));
-      statsHtml = `
-        <div class="stat-row">
-          <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing in this paste</div></div>
-          <div class="stat"><div class="num">${existingDupTypes}</div><div class="lbl">Duplicates preserved</div></div>
-        </div>`;
-      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} marked missing before aren't in this paste, so saving will mark ${noLongerMissing.length>1?'them':'it'} as owned. Your duplicates won't be touched either way.</div>`;
+      statsHtml = `<div class="stat-row">
+        <div class="stat"><div class="num">${result.missing.length}</div><div class="lbl">Missing</div></div>
+        <div class="stat"><div class="num">${existingDupTypes}</div><div class="lbl">Duplicates unchanged</div></div>
+      </div>`;
+      if (noLongerMissing.length) warningHtml = `<div class="msg info">Heads up: ${noLongerMissing.length} sticker${noLongerMissing.length>1?'s':''} previously missing aren't in this paste — saving will mark ${noLongerMissing.length>1?'them':'it'} as owned. Duplicates stay untouched.</div>`;
     } else {
-      statsHtml = `
-        <div class="stat-row">
-          <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types in this paste</div></div>
-          <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies in this paste</div></div>
-          <div class="stat"><div class="num">${existingMissingCount}</div><div class="lbl">Missing preserved</div></div>
-        </div>`;
+      statsHtml = `<div class="stat-row">
+        <div class="stat"><div class="num">${dupTypes}</div><div class="lbl">Duplicate types</div></div>
+        <div class="stat"><div class="num">${dupTotal}</div><div class="lbl">Duplicate copies</div></div>
+        <div class="stat"><div class="num">${existingMissingCount}</div><div class="lbl">Missing unchanged</div></div>
+      </div>`;
     }
     document.getElementById('previewArea').innerHTML = `
       ${statsHtml}
-      ${result.unmatched.length? `<div class="msg err">Could not read ${result.unmatched.length} entr${result.unmatched.length>1?'ies':'y'}: ${result.unmatched.slice(0,10).join(', ')}${result.unmatched.length>10?'…':''}</div>`:''}
+      ${result.unmatched.length?`<div class="msg err">Could not read ${result.unmatched.length} entr${result.unmatched.length>1?'ies':'y'}: ${result.unmatched.slice(0,10).join(', ')}${result.unmatched.length>10?'…':''}</div>`:''}
       ${warningHtml}
       <button class="btn full" id="confirmImportBtn" style="margin-top:14px;">Save this to my album</button>`;
     document.getElementById('confirmImportBtn').onclick = async ()=>{
@@ -573,7 +565,7 @@ function renderAlbum(main){
   main.innerHTML = `
     <div class="panel">
       <h2>My Album</h2>
-      <p class="lead">This view is read-only. The only way to change what's missing, owned, or duplicate is re-pasting your current lists in <strong>Import</strong> — that keeps your album exactly in sync with the real app, no accidental clicks. (Color-tagging a duplicate's parallel under "My duplicates" still works the normal way.)</p>
+      <p class="lead">Your album is updated via Import — paste one or both lists from the MoovTech app. Use "My duplicates" to tag parallel colors.</p>
       <div class="stat-row">
         <div class="stat"><div class="num">${completionPct()}%</div><div class="lbl">Complete</div></div>
         <div class="stat"><div class="num">${have+dup}</div><div class="lbl">Owned</div></div>
@@ -980,7 +972,7 @@ async function renderWanted(main){
   const threshold = Math.max(2, Math.ceil(activeMembers * 0.4));
   const allRows = [...demand.entries()]
     .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
-    .sort((a,b)=> b.count - a.count || a.code.localeCompare(b.code));
+    .sort((a,b)=> b.count - a.count || Math.random()-0.5);
   const relevantRows = allRows.filter(r=>r.count>=threshold);
   const rows = relevantRows.slice(0, 12);
 
@@ -1004,7 +996,7 @@ async function renderSearch(main){
   main.innerHTML = `
     <div class="panel">
       <h2>Find a sticker</h2>
-      <p class="lead">Type a code (e.g. FRA17) to see who in the office has a duplicate.</p>
+      <p class="lead">Type a code (e.g. FRA17) to see who in the office has a duplicate. Click their name to go straight to trading with them.</p>
       <input type="text" id="searchInput" placeholder="e.g. FRA17, MEX3, FWC9…">
       <div id="searchResults" style="margin-top:18px;"></div>
     </div>`;
@@ -1016,10 +1008,34 @@ async function renderSearch(main){
     if (!MASTER_BY_CODE.has(q)){ out.innerHTML = `<p class="empty-note">"${q}" isn't a known sticker code.</p>`; return; }
     const holders = allMembers.filter(m=>m.id!==profile.id).map(m=>{
       const v = m.collection.get(q);
-      return v && v.status==='duplicate' ? {pseudo:m.pseudo, count:v.count} : null;
+      return v && v.status==='duplicate' ? {id:m.id, pseudo:m.pseudo, count:v.count, parallel:v.parallel||'normal'} : null;
     }).filter(Boolean);
     if (holders.length===0){ out.innerHTML = `<p class="empty-note">No one has a duplicate ${q} right now.</p>`; return; }
-    out.innerHTML = holders.map(h=>`<div class="search-result-row"><div>${h.pseudo}</div><div class="count">${h.count} duplicate${h.count>1?'s':''}</div></div>`).join('');
+    out.innerHTML = holders.map(h=>`
+      <div class="search-result-row" style="cursor:pointer;" data-member-id="${h.id}">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="sticker give" style="${parallelChipStyle(h.parallel)}">${q}</span>
+          <strong>${h.pseudo}</strong>
+          <span style="color:var(--mist);font-size:13px;">${h.count} duplicate${h.count>1?'s':''}</span>
+        </div>
+        <button class="btn ghost" style="padding:6px 12px;font-size:13px;">Trade →</button>
+      </div>`).join('');
+    out.querySelectorAll('[data-member-id]').forEach(row=>{
+      row.onclick = ()=>{
+        const member = allMembers.find(m=>m.id===row.dataset.memberId);
+        if (!member) return;
+        selectedTradeMember = member;
+        tradeSelection = { give: new Set(), get: new Set() };
+        sentDealsThisSession = [];
+        currentTab = 'trade';
+        renderShell();
+        // After shell renders, open the builder for this member
+        setTimeout(()=>{
+          const builderPanel = document.getElementById('builderPanel');
+          if (builderPanel){ renderTradeBuilder(); builderPanel.scrollIntoView({behavior:'smooth', block:'start'}); }
+        }, 100);
+      };
+    });
   };
 }
 
