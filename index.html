@@ -737,37 +737,8 @@ async function renderTradeBoard(main){
       document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
     };
   });
-  // Load proposal history quietly
-  const pseudoOf = id => (allMembers.find(m=>m.id===id)||{}).pseudo || 'someone';
-  const { data: allTrades } = await sb.from('trade_proposals').select('*').or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`).order('created_at', {ascending:false});
-  const trades = allTrades || [];
   const histEl = document.getElementById('tradeBoardHistory');
-  if (!histEl) return;
-  const statusColor = {pending:'var(--mist)',accepted:'var(--blue)',completed:'var(--green)',declined:'var(--red)',cancelled:'var(--mist)'};
-  histEl.innerHTML = `
-    <h2>My Proposals</h2>
-    <p class="lead">All trade proposals you've sent or received — most recent first.</p>
-    ${trades.length===0?'<p class="empty-note">No proposals yet.</p>':trades.map(t=>{
-      const sent = t.from_user===profile.id;
-      const other = pseudoOf(sent?t.to_user:t.from_user);
-      const youGive = sent?t.offer_codes:t.request_codes;
-      const youGet = sent?t.request_codes:t.offer_codes;
-      const date = new Date(t.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'});
-      return `
-      <div class="member-row" style="cursor:default;align-items:flex-start;gap:14px;">
-        <div style="flex:1;">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            <span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>
-            <span style="font-weight:700;">${sent?'To':'From'} ${other}</span>
-            <span style="font-size:12px;color:var(--mist);">${date}</span>
-          </div>
-          <div class="sticker-chips">${youGive.map(c=>tradeChip(c,'give')).join('')}</div>
-          <div style="font-size:11px;color:var(--mist);margin:5px 0 4px;">⇄</div>
-          <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
-        </div>
-        <div style="font-weight:700;font-size:12px;text-transform:capitalize;color:${statusColor[t.status]||'var(--mist)'};">${t.status}</div>
-      </div>`;
-    }).join('')}`;
+  if (histEl) histEl.innerHTML = `<h2>Proposals</h2><p class="empty-note">Click anyone above to see your proposal history with them.</p>`;
 }
 let sentDealsThisSession = [];
 async function renderTradeBoardHistory(member){
@@ -1023,14 +994,17 @@ async function renderMyTrades(main){
       ${history.length===0?'<p class="empty-note">No finished trades yet.</p>':history.map(t=>{
         const sent = t.from_user===profile.id;
         return `
-        <div class="member-row" style="cursor:default;align-items:flex-start;">
-          <div>
+        <div class="member-row" style="cursor:default;align-items:flex-start;" id="mytrade-${t.id}">
+          <div style="flex:1;">
             <div class="name"><span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>&nbsp; ${sent?'To':'From'} ${pseudoOf(sent?t.to_user:t.from_user)}</div>
             <div class="sticker-chips" style="margin-top:6px;">${(sent?t.offer_codes:t.request_codes).map(c=>tradeChip(c, sent?'give':'get')).join('')}</div>
             <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">⇄</div>
             <div class="sticker-chips">${(sent?t.request_codes:t.offer_codes).map(c=>tradeChip(c, sent?'get':'give')).join('')}</div>
           </div>
-          <div class="count" style="text-transform:capitalize;">${t.status}</div>
+          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+            <div class="count" style="text-transform:capitalize;">${t.status}</div>
+            <button class="btn ghost" data-delete-history="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);">Delete</button>
+          </div>
         </div>`;
       }).join('')}
     </div>`;
@@ -1038,6 +1012,14 @@ async function renderMyTrades(main){
   document.querySelectorAll('[data-decline]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.decline,'declined'));
   document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.cancel,'cancelled'));
   document.querySelectorAll('[data-complete]').forEach(b=>b.onclick=()=>handleComplete(b.dataset.complete));
+  document.querySelectorAll('[data-delete-history]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      btn.disabled=true; btn.textContent='…';
+      await sb.from('trade_proposals').delete().eq('id', btn.dataset.deleteHistory);
+      const row = document.getElementById('mytrade-'+btn.dataset.deleteHistory);
+      if (row) row.remove();
+    };
+  });
 }
 
 /* ============================================================ MOST WANTED ============================================================ */
