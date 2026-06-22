@@ -727,12 +727,12 @@ async function renderTradeBoard(main){
       <div class="match-counts"><span class="get">↓ ${x.youGet.length} possible</span><span class="give">↑ ${x.youGive.length} possible</span></div>
     </div>`).join('');
   list.querySelectorAll('.member-row').forEach(row=>{
-    row.onclick = ()=>{
+    row.onclick = async ()=>{
       const x = matches.find(m=>m.member.id===row.dataset.id);
       selectedTradeMember = x.member;
       tradeSelection = { give: new Set(), get: new Set() };
       sentDealsThisSession = [];
-      renderTradeBuilder();
+      await renderTradeBuilder();
       renderTradeBoardHistory(x.member);
       document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
     };
@@ -783,12 +783,48 @@ async function renderTradeBoardHistory(member){
     };
   });
 }
-function renderTradeBuilder(){
+async function renderTradeBuilder(){
   const panel = document.getElementById('builderPanel');
   const member = selectedTradeMember;
   const prevTG = document.getElementById('tradeGroups');
   const prevScroll = prevTG ? prevTG.scrollTop : 0;
   panel.style.display = 'block';
+
+  // Fetch active proposals (pending + accepted) for both sides to detect conflicts
+  const { data: activeProposals } = await sb.from('trade_proposals')
+    .select('*')
+    .in('status', ['pending','accepted'])
+    .or(`from_user.eq.${profile.id},from_user.eq.${member.id}`);
+
+  // Cards you've already promised in OTHER active proposals (not this member)
+  const myReserved = new Map(); // code -> pseudo of who you promised it to
+  // Cards they've already promised to OTHER people (not you)
+  const theirReserved = new Map(); // code -> pseudo of who they promised it to
+
+  for (const t of (activeProposals||[])){
+    const isFromMe = t.from_user === profile.id;
+    const isFromThem = t.from_user === member.id;
+    const isToCurrentMember = t.to_user === member.id;
+    const isToMe = t.to_user === profile.id;
+
+    if (isFromMe && !isToCurrentMember){
+      // My offer codes promised to someone else
+      const otherMember = allMembers.find(m=>m.id===t.to_user);
+      for (const raw of t.offer_codes){
+        const {code} = parseTradeCode(raw);
+        myReserved.set(code, otherMember?.pseudo||'someone');
+      }
+    }
+    if (isFromThem && !isToMe){
+      // Their offer codes promised to someone else
+      const otherMember = allMembers.find(m=>m.id===t.to_user);
+      for (const raw of t.offer_codes){
+        const {code} = parseTradeCode(raw);
+        theirReserved.set(code, otherMember?.pseudo||'someone');
+      }
+    }
+  }
+
   const groupsWithDups = GROUPS.filter(g=>{
     const teamCodes = MASTER.filter(s=>s.team===g).map(s=>s.code);
     return teamCodes.some(c=>(myCollection.get(c)||{}).status==='duplicate') || teamCodes.some(c=>(member.collection.get(c)||{}).status==='duplicate');
@@ -801,7 +837,7 @@ function renderTradeBuilder(){
       <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
-    <p class="example" style="margin:-2px 0 8px;"><span style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it</p>
+    <p class="example" style="margin:-2px 0 8px;"><span style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;">⚠</span> = already promised in another deal</p>
     ${sentDealsThisSession.length?`
     <div style="background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:14px;">
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">Deals sent this session (${sentDealsThisSession.length}) — each is separate</div>
@@ -820,13 +856,15 @@ function renderTradeBuilder(){
             const v = myCollection.get(s.code);
             const sel = tradeSelection.give.has(s.code);
             const theyNeed = (member.collection.get(s.code)||{}).status==='missing';
-            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${theyNeed?`<span style="color:var(--red);font-weight:900;">↓</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            const reserved = myReserved.get(s.code);
+            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${theyNeed?`<span style="color:var(--red);font-weight:900;">↓</span> `:''}${reserved?`<span title="Already promised to ${reserved}" style="color:orange;font-weight:900;">⚠</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
           <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>{
             const v = member.collection.get(s.code);
             const sel = tradeSelection.get.has(s.code);
             const needed = (myCollection.get(s.code)||{}).status==='missing';
-            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            const reserved = theirReserved.get(s.code);
+            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${reserved?`<span title="Already promised to ${reserved}" style="color:orange;font-weight:900;">⚠</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>`;
       }).join('')}
@@ -848,10 +886,10 @@ function renderTradeBuilder(){
     <div id="proposalMsg"></div>`;
   document.getElementById('closeBuilderBtn').onclick = ()=>{ panel.style.display='none'; selectedTradeMember=null; };
   panel.querySelectorAll('.trade-chip').forEach(c=>{
-    c.onclick = ()=>{
+    c.onclick = async ()=>{
       const set = c.dataset.side==='give' ? tradeSelection.give : tradeSelection.get;
       if (set.has(c.dataset.code)) set.delete(c.dataset.code); else set.add(c.dataset.code);
-      renderTradeBuilder();
+      await renderTradeBuilder();
     };
   });
   const tg = document.getElementById('tradeGroups');
@@ -866,7 +904,7 @@ function renderTradeBuilder(){
       const sentPseudo = member.pseudo;
       sentDealsThisSession.push({ give:[...giveList], get:[...getList] });
       tradeSelection = { give: new Set(), get: new Set() };
-      renderTradeBuilder();
+      await renderTradeBuilder();
       document.getElementById('proposalMsg').innerHTML = `<div class="msg ok">Deal ${sentDealsThisSession.length} sent to ${sentPseudo} as its own separate proposal — see the log above, and "My Trades" for the full record.</div>`;
       if (selectedTradeMember) renderTradeBoardHistory(selectedTradeMember);
     }catch(e){
@@ -1095,9 +1133,9 @@ async function renderSearch(main){
         currentTab = 'trade';
         renderShell();
         // After shell renders, open the builder for this member
-        setTimeout(()=>{
+        setTimeout(async ()=>{
           const builderPanel = document.getElementById('builderPanel');
-          if (builderPanel){ renderTradeBuilder(); builderPanel.scrollIntoView({behavior:'smooth', block:'start'}); }
+          if (builderPanel){ await renderTradeBuilder(); builderPanel.scrollIntoView({behavior:'smooth', block:'start'}); }
         }, 100);
       };
     });
