@@ -755,7 +755,7 @@ function renderTradeBuilder(){
       <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
-    <p class="example" style="margin:-2px 0 8px;">${star}marks one of their cards you actually need.</p>
+    <p class="example" style="margin:-2px 0 8px;"><span style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it</p>
     ${sentDealsThisSession.length?`
     <div style="background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:14px;">
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">Deals sent this session (${sentDealsThisSession.length}) — each is separate</div>
@@ -773,7 +773,8 @@ function renderTradeBuilder(){
           <div class="sticker-chips">${mineDups.length?mineDups.map(s=>{
             const v = myCollection.get(s.code);
             const sel = tradeSelection.give.has(s.code);
-            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            const theyNeed = (member.collection.get(s.code)||{}).status==='missing';
+            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${theyNeed?`<span style="color:var(--red);font-weight:900;">↓</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
           <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>{
             const v = member.collection.get(s.code);
