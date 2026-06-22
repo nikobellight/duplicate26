@@ -454,7 +454,7 @@ function renderShell(){
         <button data-tab="import">Import</button>
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
-        <button data-tab="trades" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Trades</button>
+        <button data-tab="trades" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Trades <span id="tradesBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:800;padding:1px 6px;margin-left:4px;vertical-align:1px;"></span></button>
         <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
         <button data-tab="members">Members</button>
         <button data-tab="search" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Find a sticker</button>
@@ -468,6 +468,12 @@ function renderShell(){
     <main id="main"></main>
     <div class="footer-note">Not affiliated with Panini or FIFA. Built for the office, just for fun. · <a href="https://www.laststicker.com/cards/preview/panini_world_cup_2026/" target="_blank" rel="noopener">See sticker images on LastSticker.com ↗</a></div>`;
   document.getElementById('switchBtn').onclick = ()=>{ localStorage.removeItem('my_profile_id'); profile=null; renderAuth(); };
+  // Load pending count quietly in the background
+  sb.from('trade_proposals').select('id').eq('to_user', profile.id).eq('status','pending').then(({data})=>{
+    const count = (data||[]).length;
+    const badge = document.getElementById('tradesBadge');
+    if (badge && count>0){ badge.textContent=count; badge.style.display='inline'; }
+  });
   document.querySelectorAll('nav.tabs button').forEach(b=>{ b.onclick = ()=>{ if (b.disabled) return; currentTab = b.dataset.tab; renderTab(); }; });
   if (!hasData) currentTab = 'import';
   renderTab();
