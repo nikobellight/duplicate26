@@ -878,7 +878,12 @@ async function renderTradeBuilder(){
 
   const groupsWithDups = GROUPS.filter(g=>{
     const teamCodes = MASTER.filter(s=>s.team===g).map(s=>s.code);
-    return teamCodes.some(c=>(myCollection.get(c)||{}).status==='duplicate') || teamCodes.some(c=>(member.collection.get(c)||{}).status==='duplicate');
+    // Only show teams where there's at least one real match in either direction
+    const iGiveThemSomething = teamCodes.some(c=>
+      (myCollection.get(c)||{}).status==='duplicate' && (member.collection.get(c)||{}).status==='missing');
+    const theyGiveMeSomething = teamCodes.some(c=>
+      (member.collection.get(c)||{}).status==='duplicate' && (myCollection.get(c)||{}).status==='missing');
+    return iGiveThemSomething || theyGiveMeSomething;
   });
   const giveList = [...tradeSelection.give], getList = [...tradeSelection.get];
   const star = `<span class="indicator-symbol" style="color:var(--yellow-deep);">★</span> `;
@@ -895,11 +900,15 @@ async function renderTradeBuilder(){
       ${sentDealsThisSession.map((d,i)=>`<div style="font-size:12.5px;margin-bottom:4px;"><strong>Deal ${i+1}:</strong> ${d.give.join(', ')||'nothing'} → ${d.get.join(', ')||'nothing'}</div>`).join('')}
     </div>`:''}
     <div id="tradeGroups" style="max-height:320px;overflow-y:auto;">
-      ${groupsWithDups.length===0?'<p class="empty-note">Neither of you has any duplicates yet.</p>':groupsWithDups.map(g=>{
+      ${groupsWithDups.length===0?'<p class="empty-note">No mutual matches right now — neither of you has a duplicate the other needs.</p>':groupsWithDups.map(g=>{
         const [name] = TEAM_INFO[g];
         const teamCodes = MASTER.filter(s=>s.team===g);
-        const mineDups = teamCodes.filter(s=>(myCollection.get(s.code)||{}).status==='duplicate');
-        const theirsDups = teamCodes.filter(s=>(member.collection.get(s.code)||{}).status==='duplicate');
+        const mineDups = teamCodes.filter(s=>
+          (myCollection.get(s.code)||{}).status==='duplicate' &&
+          (member.collection.get(s.code)||{}).status==='missing');
+        const theirsDups = teamCodes.filter(s=>
+          (member.collection.get(s.code)||{}).status==='duplicate' &&
+          (myCollection.get(s.code)||{}).status==='missing');
         return `
         <div class="trade-team-row">
           <div class="trade-team-label">${teamLabel(g)}<span>${name}</span></div>
