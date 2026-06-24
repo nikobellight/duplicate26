@@ -787,7 +787,7 @@ async function renderTradeBoard(main){
     };
   });
   const histEl = document.getElementById('tradeBoardHistory');
-  if (histEl) histEl.innerHTML = `<h2>Proposals</h2><p class="empty-note">Click anyone above to see your proposal history with them.</p>`;
+  if (histEl) await renderTradeBoardHistory(null); // show all proposals on load
   const refreshBtn = document.getElementById('refreshTB');
   if (refreshBtn) refreshBtn.onclick = ()=>renderTradeBoard(document.getElementById('main'));
 }
@@ -796,16 +796,27 @@ async function renderTradeBoardHistory(member){
   const histEl = document.getElementById('tradeBoardHistory');
   if (!histEl) return;
   histEl.innerHTML = `<div class="loading" style="padding:20px 0;">Loading…</div>`;
-  const { data } = await sb.from('trade_proposals').select('*')
-    .or(`and(from_user.eq.${profile.id},to_user.eq.${member.id}),and(from_user.eq.${member.id},to_user.eq.${profile.id})`)
-    .order('created_at', {ascending:false});
+  let query;
+  if (member){
+    query = sb.from('trade_proposals').select('*')
+      .or(`and(from_user.eq.${profile.id},to_user.eq.${member.id}),and(from_user.eq.${member.id},to_user.eq.${profile.id})`)
+      .order('created_at', {ascending:false});
+  } else {
+    query = sb.from('trade_proposals').select('*')
+      .or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`)
+      .order('created_at', {ascending:false});
+  }
+  const { data } = await query;
   const trades = data || [];
-  const statusColor = {pending:'var(--mist)',accepted:'var(--blue)',completed:'var(--green)',declined:'var(--red)',cancelled:'var(--mist-soft)'};
+  const pseudoOf = id => (allMembers.find(m=>m.id===id)||{}).pseudo || 'someone';
+  const statusColor = {pending:'var(--mist)',accepted:'var(--blue)',completed:'var(--green)',rejected:'var(--red)',cancelled:'var(--mist-soft)'};
   const canDelete = t => t.status !== 'pending' && t.status !== 'accepted';
+  const title = member ? `Proposals with ${member.pseudo}` : 'All my proposals';
   histEl.innerHTML = `
-    <h2>Proposals with ${member.pseudo}</h2>
-    ${trades.length===0?'<p class="empty-note">No proposals yet with this person.</p>':trades.map(t=>{
+    <h2>${title}</h2>
+    ${trades.length===0?`<p class="empty-note">${member?'No proposals yet with this person.':'No proposals yet.'}</p>`:trades.map(t=>{
       const sent = t.from_user===profile.id;
+      const other = member ? member.pseudo : pseudoOf(sent?t.to_user:t.from_user);
       const youGive = sent?t.offer_codes:t.request_codes;
       const youGet = sent?t.request_codes:t.offer_codes;
       const date = new Date(t.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'});
@@ -814,6 +825,7 @@ async function renderTradeBoardHistory(member){
         <div style="flex:1;">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
             <span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>
+            ${!member?`<span style="font-weight:700;font-size:13px;">${sent?'To':'From'} ${other}</span>`:''}
             <span style="font-size:12px;color:var(--mist);">${date}</span>
             <span style="font-weight:700;font-size:12px;text-transform:capitalize;color:${statusColor[t.status]||'var(--mist)'};">${t.status}</span>
           </div>
@@ -821,7 +833,7 @@ async function renderTradeBoardHistory(member){
           <div style="font-size:11px;color:var(--mist);margin:5px 0 4px;">⇄</div>
           <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
         </div>
-        ${canDelete(t)?`<button class="btn ghost" data-delete-trade="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);flex-shrink:0;">Delete</button>`:''}
+        ${canDelete(t)?`<button class="btn ghost" data-delete-trade="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);background:var(--paper);flex-shrink:0;">Delete</button>`:''}
       </div>`;
     }).join('')}`;
   histEl.querySelectorAll('[data-delete-trade]').forEach(btn=>{
@@ -830,7 +842,7 @@ async function renderTradeBoardHistory(member){
       await sb.from('trade_proposals').delete().eq('id', btn.dataset.deleteTrade);
       const row = document.getElementById('hist-'+btn.dataset.deleteTrade);
       if (row) row.remove();
-      if (!histEl.querySelector('.member-row')) histEl.innerHTML += `<p class="empty-note">No proposals yet with this person.</p>`;
+      if (!histEl.querySelector('.member-row')) histEl.innerHTML += `<p class="empty-note">No proposals yet.</p>`;
     };
   });
 }
@@ -1014,7 +1026,25 @@ async function transferCodes(giverId, receiverId, rawCodes){
   }
 }
 async function handleAccept(tradeId){
+  const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
+  if (!trade) return;
+  // Update this trade to accepted
   await sb.from('trade_proposals').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', tradeId);
+  // Find cards being offered by the giver in this trade
+  const offeredCodes = trade.offer_codes.map(r=>parseTradeCode(r).code);
+  // Find all OTHER pending proposals where the same giver is offering the same cards
+  const { data: otherPending } = await sb.from('trade_proposals')
+    .select('*').eq('from_user', trade.from_user).eq('status','pending').neq('id', tradeId);
+  for (const other of (otherPending||[])){
+    const newOffer = other.offer_codes.filter(r=>!offeredCodes.includes(parseTradeCode(r).code));
+    if (newOffer.length === 0 && other.request_codes.length === 0){
+      // Proposal is now empty — cancel it
+      await sb.from('trade_proposals').update({ status:'cancelled', updated_at:new Date().toISOString() }).eq('id', other.id);
+    } else if (newOffer.length !== other.offer_codes.length){
+      // Remove the conflicting cards
+      await sb.from('trade_proposals').update({ offer_codes: newOffer, updated_at:new Date().toISOString() }).eq('id', other.id);
+    }
+  }
   renderTab();
 }
 async function handleComplete(tradeId){
@@ -1040,9 +1070,9 @@ async function renderMyTrades(main){
     <div class="help-box">
       <h3>📬 How My Trades works</h3>
       <ul>
-        <li><strong>Waiting on you</strong> — someone sent you a proposal. Accept or Decline.</li>
+        <li><strong>Waiting on you</strong> — someone sent you a proposal. Approve or Reject.</li>
         <li><strong>Sent by you</strong> — proposals you sent, waiting for the other person. You can Cancel.</li>
-        <li><strong>Accepted — not applied yet</strong> — both agreed. Once you've physically swapped the stickers, click <strong>Deal done ✓</strong> to update both albums automatically.</li>
+        <li><strong>Approved — not applied yet</strong> — both agreed. Once you've physically swapped the stickers, click <strong>Deal done ✓</strong> to update both albums automatically.</li>
         <li><strong>History</strong> — past deals. You can delete finished entries to keep it clean.</li>
       </ul>
     </div>
@@ -1069,8 +1099,8 @@ async function renderMyTrades(main){
             <div class="sticker-chips">${t.request_codes.map(c=>tradeChip(c,'give')).join('')}</div>
           </div>
           <div style="display:flex;flex-direction:column;gap:6px;">
-            <button class="btn" data-accept="${t.id}">Accept</button>
-            <button class="btn ghost" data-decline="${t.id}">Decline</button>
+            <button class="btn" data-approve="${t.id}">Approve</button>
+            <button class="btn ghost" data-reject="${t.id}">Reject</button>
           </div>
         </div>`).join('')}
       <h3 style="font-size:15px;margin:18px 0 8px;">Sent by you (${sentByYou.length})</h3>
@@ -1084,7 +1114,7 @@ async function renderMyTrades(main){
           </div>
           <button class="btn ghost" data-cancel="${t.id}">Cancel</button>
         </div>`).join('')}
-      <h3 style="font-size:15px;margin:18px 0 8px;">Accepted — not applied yet (${accepted.length})</h3>
+      <h3 style="font-size:15px;margin:18px 0 8px;">Approved — not applied yet (${accepted.length})</h3>
       ${accepted.length===0?'<p class="empty-note">Nothing here. Trades land here once accepted, and stay until someone confirms the swap actually happened.</p>':accepted.map(t=>{
         const otherId = t.from_user===profile.id ? t.to_user : t.from_user;
         const youGive = t.from_user===profile.id ? t.offer_codes : t.request_codes;
@@ -1118,8 +1148,8 @@ async function renderMyTrades(main){
         </div>`;
       }).join('')}
     </div>`;
-  document.querySelectorAll('[data-accept]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.accept));
-  document.querySelectorAll('[data-decline]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.decline,'declined'));
+  document.querySelectorAll('[data-accept]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.approve));
+  document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.reject,'rejected'));
   document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.cancel,'cancelled'));
   document.querySelectorAll('[data-complete]').forEach(b=>b.onclick=()=>handleComplete(b.dataset.complete));
   document.querySelectorAll('[data-delete-history]').forEach(btn=>{
