@@ -839,7 +839,10 @@ async function renderTradeBoardHistory(member){
   histEl.querySelectorAll('[data-delete-trade]').forEach(btn=>{
     btn.onclick = async ()=>{
       btn.disabled = true; btn.textContent = '…';
-      await sb.from('trade_proposals').delete().eq('id', btn.dataset.deleteTrade);
+      const t = (await sb.from('trade_proposals').select('*').eq('id', btn.dataset.deleteTrade).maybeSingle()).data;
+      if (!t) return;
+      const col = t.from_user === profile.id ? 'hidden_from' : 'hidden_to';
+      await sb.from('trade_proposals').update({ [col]: true, updated_at:new Date().toISOString() }).eq('id', btn.dataset.deleteTrade);
       const row = document.getElementById('hist-'+btn.dataset.deleteTrade);
       if (row) row.remove();
       if (!histEl.querySelector('.member-row')) histEl.innerHTML += `<p class="empty-note">No proposals yet.</p>`;
@@ -1003,17 +1006,40 @@ async function sendTradeProposal(toUserId, offerCodes, requestCodes){
 }
 async function loadMyTrades(){
   const { data } = await sb.from('trade_proposals').select('*').or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`).order('created_at', {ascending:false});
-  myTrades = data || [];
+  // Filter out trades the current user has soft-deleted
+  myTrades = (data||[]).filter(t=>{
+    if (t.from_user === profile.id && t.hidden_from) return false;
+    if (t.to_user === profile.id && t.hidden_to) return false;
+    return true;
+  });
 }
-async function transferCodes(giverId, receiverId, rawCodes){
+// Reduce giver's duplicate count — called on Approve
+async function reserveCodes(userId, rawCodes){
+  for (const raw of rawCodes){
+    const { code } = parseTradeCode(raw);
+    const { data: row } = await sb.from('collections').select('*').eq('user_id', userId).eq('sticker_code', code).maybeSingle();
+    if (row && row.status==='duplicate'){
+      const newCount = row.duplicate_count - 1;
+      await sb.from('collections').update({ status: newCount>0?'duplicate':'have', duplicate_count: Math.max(newCount,0), parallel: newCount>0?row.parallel:'normal', updated_at:new Date().toISOString() }).eq('user_id', userId).eq('sticker_code', code);
+    }
+  }
+}
+// Restore giver's duplicate count — called on Cancel after Approve
+async function unserveCodes(userId, rawCodes){
   for (const raw of rawCodes){
     const { code, parallel } = parseTradeCode(raw);
-    const { data: giverRow } = await sb.from('collections').select('*').eq('user_id', giverId).eq('sticker_code', code).maybeSingle();
-    const { data: receiverRow } = await sb.from('collections').select('*').eq('user_id', receiverId).eq('sticker_code', code).maybeSingle();
-    if (giverRow && giverRow.status==='duplicate'){
-      const newCount = giverRow.duplicate_count - 1;
-      await sb.from('collections').update({ status: newCount>0?'duplicate':'have', duplicate_count: Math.max(newCount,0), parallel: newCount>0?giverRow.parallel:'normal', updated_at:new Date().toISOString() }).eq('user_id', giverId).eq('sticker_code', code);
+    const { data: row } = await sb.from('collections').select('*').eq('user_id', userId).eq('sticker_code', code).maybeSingle();
+    if (row){
+      if (row.status==='have') await sb.from('collections').update({ status:'duplicate', duplicate_count:1, parallel, updated_at:new Date().toISOString() }).eq('user_id', userId).eq('sticker_code', code);
+      else if (row.status==='duplicate') await sb.from('collections').update({ duplicate_count:row.duplicate_count+1, updated_at:new Date().toISOString() }).eq('user_id', userId).eq('sticker_code', code);
     }
+  }
+}
+// Give cards to receiver only — giver side already reserved on Approve
+async function giveToReceiver(receiverId, rawCodes){
+  for (const raw of rawCodes){
+    const { code, parallel } = parseTradeCode(raw);
+    const { data: receiverRow } = await sb.from('collections').select('*').eq('user_id', receiverId).eq('sticker_code', code).maybeSingle();
     if (receiverRow){
       let newStatus, newCount;
       if (receiverRow.status==='missing'){ newStatus='have'; newCount=0; }
@@ -1028,40 +1054,46 @@ async function transferCodes(giverId, receiverId, rawCodes){
 async function handleAccept(tradeId){
   const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
   if (!trade) return;
-  // Update this trade to accepted
   await sb.from('trade_proposals').update({ status:'accepted', updated_at:new Date().toISOString() }).eq('id', tradeId);
-  // Find cards being offered by the giver in this trade
+  // Reserve cards from both sides so they disappear from each person's trade board
+  await reserveCodes(trade.from_user, trade.offer_codes);
+  await reserveCodes(trade.to_user, trade.request_codes);
+  // Remove offered cards from other pending proposals by the same giver
   const offeredCodes = trade.offer_codes.map(r=>parseTradeCode(r).code);
-  // Find all OTHER pending proposals where the same giver is offering the same cards
-  const { data: otherPending } = await sb.from('trade_proposals')
-    .select('*').eq('from_user', trade.from_user).eq('status','pending').neq('id', tradeId);
+  const { data: otherPending } = await sb.from('trade_proposals').select('*').eq('from_user', trade.from_user).eq('status','pending').neq('id', tradeId);
   for (const other of (otherPending||[])){
     const newOffer = other.offer_codes.filter(r=>!offeredCodes.includes(parseTradeCode(r).code));
-    if (newOffer.length === 0 && other.request_codes.length === 0){
-      // Proposal is now empty — cancel it
-      await sb.from('trade_proposals').update({ status:'cancelled', updated_at:new Date().toISOString() }).eq('id', other.id);
-    } else if (newOffer.length !== other.offer_codes.length){
-      // Remove the conflicting cards
-      await sb.from('trade_proposals').update({ offer_codes: newOffer, updated_at:new Date().toISOString() }).eq('id', other.id);
-    }
+    if (newOffer.length===0 && other.request_codes.length===0) await sb.from('trade_proposals').update({ status:'cancelled', updated_at:new Date().toISOString() }).eq('id', other.id);
+    else if (newOffer.length!==other.offer_codes.length) await sb.from('trade_proposals').update({ offer_codes:newOffer, updated_at:new Date().toISOString() }).eq('id', other.id);
   }
-  renderTab();
+  await loadMyCollection();
+  renderShell();
 }
 async function handleComplete(tradeId){
-  const trade = myTrades.find(t=>t.id===tradeId);
-  if (!trade) return;
+  const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
+  if (!trade || trade.status==='completed') return;
   try{
-    await transferCodes(trade.from_user, trade.to_user, trade.offer_codes);
-    await transferCodes(trade.to_user, trade.from_user, trade.request_codes);
     await sb.from('trade_proposals').update({ status:'completed', updated_at:new Date().toISOString() }).eq('id', tradeId);
+    // Giver side already reserved on Approve — only give to receivers now
+    await giveToReceiver(trade.to_user, trade.offer_codes);
+    await giveToReceiver(trade.from_user, trade.request_codes);
     await loadMyCollection();
     currentTab = 'trades';
     renderShell();
   }catch(e){ alert('Trade failed: '+e.message); }
 }
 async function handleRespond(tradeId, newStatus){
+  // If cancelling an approved trade, restore both sides' reserved cards
+  if (newStatus==='cancelled'){
+    const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
+    if (trade && trade.status==='accepted'){
+      await unserveCodes(trade.from_user, trade.offer_codes);
+      await unserveCodes(trade.to_user, trade.request_codes);
+    }
+  }
   await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
-  renderTab();
+  await loadMyCollection();
+  renderShell();
 }
 
 /* ============================================================ MY TRADES ============================================================ */
@@ -1143,6 +1175,7 @@ async function renderMyTrades(main){
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
             <div class="count" style="text-transform:capitalize;">${t.status}</div>
+            ${t.status==='completed'?`<button class="btn ghost" data-cancel="${t.id}" style="padding:5px 10px;font-size:12px;">Cancel</button>`:''}
             <button class="btn ghost" data-delete-history="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
           </div>
         </div>`;
@@ -1156,7 +1189,10 @@ async function renderMyTrades(main){
   document.querySelectorAll('[data-delete-history]').forEach(btn=>{
     btn.onclick = async ()=>{
       btn.disabled=true; btn.textContent='…';
-      await sb.from('trade_proposals').delete().eq('id', btn.dataset.deleteHistory);
+      const t = (await sb.from('trade_proposals').select('*').eq('id', btn.dataset.deleteHistory).maybeSingle()).data;
+      if (!t) return;
+      const col = t.from_user === profile.id ? 'hidden_from' : 'hidden_to';
+      await sb.from('trade_proposals').update({ [col]: true, updated_at:new Date().toISOString() }).eq('id', btn.dataset.deleteHistory);
       const row = document.getElementById('mytrade-'+btn.dataset.deleteHistory);
       if (row) row.remove();
     };
