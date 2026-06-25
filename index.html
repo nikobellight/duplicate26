@@ -534,6 +534,7 @@ function renderImport(main){
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
+    try{
     const missingText = document.getElementById('importMissing').value.trim();
     const dupText = document.getElementById('importDuplicates').value.trim();
     const hasMissing = missingText.length > 0;
@@ -542,7 +543,7 @@ function renderImport(main){
       document.getElementById('previewArea').innerHTML = `<div class="msg err">Paste at least one list before parsing.</div>`;
       return;
     }
-    let result = { missing:[], duplicates:{}, mode:'both' };
+    let result = { missing:[], duplicates:{}, unmatched:[], mode:'both' };
     let mode = 'both';
     // MoovTech boxes
     if (hasMissing || hasDup){
@@ -550,6 +551,7 @@ function renderImport(main){
       const r = parseExport(missingText + '\n' + dupText);
       result.missing = [...new Set([...result.missing, ...r.missing])];
       Object.assign(result.duplicates, r.duplicates);
+      result.unmatched = r.unmatched || [];
       result.mode = mode;
     }
     const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
@@ -593,6 +595,7 @@ function renderImport(main){
       try{ await saveCollection(result.missing, result.duplicates, mode); currentTab='album'; renderShell(); }
       catch(e){ b.disabled=false; b.textContent='Save this to my album'; alert('Save failed: '+e.message); }
     };
+    }catch(err){ document.getElementById('previewArea').innerHTML = `<div class="msg err">Parse error: ${err.message}</div>`; }
   };
 }
 
