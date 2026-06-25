@@ -294,19 +294,18 @@ function parseExport(text, forceContext){
 
 // PaniniTrade format parser — handles messy multi-line, split entries, special chars
 function parsePaniniTrade(text){
-  const TEAM_MAP = { 'INTRO':'FWC', 'GER':'GER', 'ENG':'ENG' }; // passthrough + overrides
+  const TEAM_MAP = { 'INTRO':'FWC', 'GER':'GER', 'ENG':'ENG' };
   const missing = new Set();
   const duplicates = {};
   let isDuplicate = false;
   let currentTeam = null;
 
-  // Pre-process: join wrapped lines — if a line starts with (x or just digits/commas, merge with previous
+  // Pre-process: join wrapped lines
   const rawLines = text.split('\n');
   const lines = [];
   for (const raw of rawLines){
     const t = raw.trim();
     if (!t) continue;
-    // Line is a continuation if it starts with (x, digits, or comma
     if (lines.length > 0 && /^[\(\d,\s]/.test(t) && !/^[A-Z]{2,5}/.test(t)){
       lines[lines.length-1] += ', ' + t;
     } else {
@@ -314,34 +313,55 @@ function parsePaniniTrade(text){
     }
   }
 
-  for (const line of lines){
+  for (let line of lines){
     if (!line) continue;
     if (line.startsWith('http') || line.startsWith('www.')) continue;
-    const lower = line.toLowerCase();
-    if (lower.includes('missing') && lower.includes('-')) { isDuplicate = false; continue; }
-    if (lower.includes('duplicate') && lower.includes('-')) { isDuplicate = true; continue; }
 
-    // Extract team code: letters at start, ignore trailing junk like **, €, +, spaces
-    // Handles: "KOR :", "AUS**:", "TUR € :", "CAN", "INTRO:"
-    const teamLine = line.match(/^([A-Z]{2,5})\s*[^A-Z\d:]*:?\s*(.*)/);
-    if (teamLine){
-      let rawTeam = teamLine[1];
-      let rawNums = teamLine[2].trim();
-      let team = TEAM_MAP[rawTeam] || rawTeam;
-      if (MASTER_BY_CODE.has(team+'1') || MASTER.some(s=>s.team===team)){
-        currentTeam = team;
-        if (rawNums) extractPaniniNums(rawNums, team, isDuplicate, missing, duplicates);
-        continue;
-      }
+    // Check for section switch — may appear mid-line after some data
+    // e.g. "NZL: 4, 7, 10, 13          DUPLICATES - 2026 USA MEX CAN:"
+    const missingIdx = line.search(/MISSING\s*-/i);
+    const dupIdx = line.search(/DUPLICATE[S]?\s*-/i);
+
+    if (dupIdx !== -1){
+      // Process any data before the DUPLICATES marker first
+      const before = line.slice(0, dupIdx).trim();
+      if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
+      isDuplicate = true;
+      continue;
+    }
+    if (missingIdx !== -1){
+      const before = line.slice(0, missingIdx).trim();
+      if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
+      isDuplicate = false;
+      continue;
     }
 
-    // Orphaned colon line or bare numbers — attach to currentTeam
-    if (currentTeam){
-      const orphan = line.match(/^:?\s*([\d,\s\(x\)]+)$/i);
-      if (orphan) extractPaniniNums(orphan[1], currentTeam, isDuplicate, missing, duplicates);
-    }
+    processPaniniLine(line, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
   }
   return { missing:[...missing], duplicates, unmatched:[] };
+}
+
+function processPaniniLine(line, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, setTeam){
+  if (!line || line.startsWith('http') || line.startsWith('www.')) return;
+
+  // Team line: "KOR :", "AUS**:", "TUR € :", "INTRO:", "CAN"
+  const teamLine = line.match(/^([A-Z]{2,5})\s*[^A-Z\d:]*:?\s*(.*)/);
+  if (teamLine){
+    let rawTeam = teamLine[1];
+    let rawNums = teamLine[2].trim();
+    let team = TEAM_MAP[rawTeam] || rawTeam;
+    if (MASTER_BY_CODE.has(team+'1') || MASTER.some(s=>s.team===team)){
+      setTeam(team);
+      if (rawNums) extractPaniniNums(rawNums, team, isDuplicate, missing, duplicates);
+      return;
+    }
+  }
+
+  // Orphaned numbers — attach to currentTeam
+  if (currentTeam){
+    const orphan = line.match(/^:?\s*([\d,\s\(x\)]+)$/i);
+    if (orphan) extractPaniniNums(orphan[1], currentTeam, isDuplicate, missing, duplicates);
+  }
 }
 
 function extractPaniniNums(text, team, isDuplicate, missing, duplicates){
