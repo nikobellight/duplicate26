@@ -1282,13 +1282,17 @@ async function renderMyTrades(main){
         const youGet = t.from_user===profile.id ? t.request_codes : t.offer_codes;
         return `
         <div class="member-row" style="cursor:default;align-items:flex-start;">
-          <div>
+          <div style="flex:1;">
             <div class="name">With ${pseudoOf(otherId)} — you give</div>
             <div class="sticker-chips" style="margin-top:6px;">${youGive.map(c=>tradeChip(c,'give')).join('')}</div>
             <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">you get:</div>
             <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
           </div>
-          <button class="btn" data-complete="${t.id}">Deal done ✓</button>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <button class="btn" data-complete="${t.id}">Deal done ✓</button>
+            <button class="btn ghost" data-cancel="${t.id}" style="font-size:12px;padding:5px 10px;">Cancel</button>
+            <button class="btn ghost" data-delete-history="${t.id}" style="font-size:12px;padding:5px 10px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
+          </div>
         </div>`;
       }).join('')}
       <h3 style="font-size:15px;margin:18px 0 8px;">History</h3>
