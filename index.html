@@ -1280,10 +1280,17 @@ async function renderWanted(main){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
       <div class="panel">
         <h2>🎯 Your Most Wanted</h2>
-        <p class="lead">Your duplicates people need most.</p>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+          <p class="lead" style="margin:0;">Your duplicates people need most.</p>
+          <select id="wantedMemberFilter" style="padding:6px 10px;border:1.5px solid var(--line);border-radius:8px;font:inherit;font-size:13px;background:var(--paper);cursor:pointer;">
+            <option value="">All members</option>
+            ${[...new Set(myRows.flatMap(r=>r.neededBy))].sort((a,b)=>a.pseudo.localeCompare(b.pseudo)).map(m=>`<option value="${m.id}">${m.pseudo}</option>`).join('')}
+          </select>
+        </div>
+        <div id="yourMostWantedList">
         ${myRows.length===0?'<p class="empty-note">None of your duplicates are needed right now.</p>':
         myRows.map(r=>`
-          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;">
+          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;" data-needed-by="${r.neededBy.map(m=>m.id).join(',')}">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
               <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${r.code}${r.count>1?` (${r.count}x)`:''}</span>
               <span class="count">${r.neededBy.length} need it</span>
@@ -1292,6 +1299,7 @@ async function renderWanted(main){
               ${r.neededBy.map(m=>`<button class="btn ghost" style="padding:4px 10px;font-size:12px;" data-wanted-member="${m.id}">${m.pseudo} →</button>`).join('')}
             </div>
           </div>`).join('')}
+        </div>
       </div>
       <div class="panel">
         <h2>🌍 Most Wanted</h2>
@@ -1325,6 +1333,14 @@ async function renderWanted(main){
       }, 100);
     };
   });
+  const filterSel = document.getElementById('wantedMemberFilter');
+  if (filterSel) filterSel.onchange = ()=>{
+    const val = filterSel.value;
+    document.querySelectorAll('#yourMostWantedList [data-needed-by]').forEach(card=>{
+      const ids = card.dataset.neededBy.split(',');
+      card.style.display = (!val || ids.includes(val)) ? '' : 'none';
+    });
+  };
 }
 
 async function renderSearch(main){
