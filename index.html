@@ -292,100 +292,6 @@ function parseExport(text, forceContext){
   return { missing:[...missing], duplicates, unmatched };
 }
 
-// PaniniTrade format parser — handles messy multi-line, split entries, special chars
-function parsePaniniTrade(text, forceContext){
-  const TEAM_MAP = { 'INTRO':'FWC', 'GER':'GER', 'ENG':'ENG' };
-  const missing = new Set();
-  const duplicates = {};
-  let isDuplicate = forceContext === 'duplicate';
-  let currentTeam = null;
-
-  // Pre-process: join wrapped lines
-  const rawLines = text.split('\n');
-  const lines = [];
-  for (const raw of rawLines){
-    const t = raw.trim();
-    if (!t) continue;
-    if (lines.length > 0 && /^[\(\d,\s]/.test(t) && !/^[A-Z]{2,5}/.test(t)){
-      lines[lines.length-1] += ', ' + t;
-    } else {
-      lines.push(t);
-    }
-  }
-
-  for (let line of lines){
-    if (!line) continue;
-    if (line.startsWith('http') || line.startsWith('www.')) continue;
-
-    // Only detect section switches when context is NOT forced (combined paste box)
-    if (!forceContext){
-      const dupIdx = line.search(/DUPLICATE[S]?\s*-/i);
-      const missingIdx = line.search(/MISSING\s*-/i);
-      if (dupIdx !== -1){
-        const before = line.slice(0, dupIdx).trim();
-        if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
-        isDuplicate = true;
-        continue;
-      }
-      if (missingIdx !== -1){
-        const before = line.slice(0, missingIdx).trim();
-        if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
-        isDuplicate = false;
-        continue;
-      }
-    } else {
-      // With forced context, skip any section header lines entirely
-      if (/DUPLICATE[S]?\s*-/i.test(line) || /MISSING\s*-/i.test(line)) continue;
-    }
-
-    processPaniniLine(line, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
-  }
-  return { missing:[...missing], duplicates, unmatched:[] };
-}
-
-function processPaniniLine(line, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, setTeam){
-  if (!line || line.startsWith('http') || line.startsWith('www.')) return;
-
-  // Team line: "KOR :", "AUS**:", "TUR € :", "INTRO:", "CAN"
-  const teamLine = line.match(/^([A-Z]{2,5})\s*[^A-Z\d:]*:?\s*(.*)/);
-  if (teamLine){
-    let rawTeam = teamLine[1];
-    let rawNums = teamLine[2].trim();
-    let team = TEAM_MAP[rawTeam] || rawTeam;
-    if (MASTER_BY_CODE.has(team+'1') || MASTER.some(s=>s.team===team)){
-      setTeam(team);
-      if (rawNums) extractPaniniNums(rawNums, team, isDuplicate, missing, duplicates);
-      return;
-    }
-  }
-
-  // Orphaned numbers — attach to currentTeam
-  if (currentTeam){
-    const orphan = line.match(/^:?\s*([\d,\s\(x\)]+)$/i);
-    if (orphan) extractPaniniNums(orphan[1], currentTeam, isDuplicate, missing, duplicates);
-  }
-}
-
-function extractPaniniNums(text, team, isDuplicate, missing, duplicates){
-  const tokens = text.split(',').map(t=>t.trim()).filter(Boolean);
-  for (const tok of tokens){
-    // "10 (x2)" or "10(x2)" or just "10"
-    const withCount = tok.match(/(\d+)\s*\(x(\d+)\)/i);
-    const justNum = tok.match(/^(\d+)$/);
-    if (withCount){
-      const code = `${team}${parseInt(withCount[1])}`;
-      const count = parseInt(withCount[2]);
-      if (!MASTER_BY_CODE.has(code)) continue;
-      if (isDuplicate) duplicates[code] = (duplicates[code]||0) + count;
-      else missing.add(code);
-    } else if (justNum){
-      const code = `${team}${parseInt(justNum[1])}`;
-      if (!MASTER_BY_CODE.has(code)) continue;
-      if (isDuplicate) duplicates[code] = (duplicates[code]||0) + 1;
-      else missing.add(code);
-    }
-  }
-}
 
 function buildCollectionMap(missing, duplicates){
   const map = new Map();
@@ -612,7 +518,6 @@ function renderImport(main){
       <h3>📲 How to import</h3>
       <ol>
         <li><strong>Option 1 — Sticker Album 2026 app (MoovTech):</strong> share your missing list → paste in the first box, share your duplicate list → paste in the second box. You can paste one or both — whichever box you fill in gets updated, the other stays untouched.</li>
-        <li><strong>Option 2 — PaniniTrade.com:</strong> paste the MISSING section in the "PaniniTrade Missing" box and the DUPLICATES section in the "PaniniTrade Duplicates" box separately below.</li>
         <li>Hit <strong>Parse</strong> to preview, then <strong>Save</strong>.</li>
       </ol>
     </div>
@@ -624,25 +529,16 @@ function renderImport(main){
       <div style="height:14px;"></div>
       <label>Duplicate stickers list</label>
       <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
-      <div style="height:18px;border-top:1px solid var(--line);margin-top:18px;"></div>
-      <label>PaniniTrade.com — Missing <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(paste only the MISSING section from paninitrade.com)</span></label>
-      <textarea class="import-box" id="importPaniniMissing" placeholder="Paste your PaniniTrade MISSING section here…" style="min-height:100px;"></textarea>
       <div style="height:10px;"></div>
-      <label>PaniniTrade.com — Duplicates <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(paste only the DUPLICATES section from paninitrade.com)</span></label>
-      <textarea class="import-box" id="importPaniniDuplicates" placeholder="Paste your PaniniTrade DUPLICATES section here…" style="min-height:100px;"></textarea>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
     const missingText = document.getElementById('importMissing').value.trim();
     const dupText = document.getElementById('importDuplicates').value.trim();
-    const paniniMissingText = document.getElementById('importPaniniMissing').value.trim();
-    const paniniDupText = document.getElementById('importPaniniDuplicates').value.trim();
     const hasMissing = missingText.length > 0;
     const hasDup = dupText.length > 0;
-    const hasPaniniMissing = paniniMissingText.length > 0;
-    const hasPaniniDup = paniniDupText.length > 0;
-    if (!hasMissing && !hasDup && !hasPaniniMissing && !hasPaniniDup){
+    if (!hasMissing && !hasDup){
       document.getElementById('previewArea').innerHTML = `<div class="msg err">Paste at least one list before parsing.</div>`;
       return;
     }
@@ -655,17 +551,6 @@ function renderImport(main){
       result.missing = [...new Set([...result.missing, ...r.missing])];
       Object.assign(result.duplicates, r.duplicates);
       result.mode = mode;
-    }
-    // PaniniTrade boxes — force context per box
-    if (hasPaniniMissing){
-      const r = parsePaniniTrade(paniniMissingText, 'missing');
-      result.missing = [...new Set([...result.missing, ...r.missing])];
-    }
-    if (hasPaniniDup){
-      const r = parsePaniniTrade(paniniDupText, 'duplicate');
-      Object.entries(r.duplicates).forEach(([code,count])=>{
-        result.duplicates[code] = (result.duplicates[code]||0) + count;
-      });
     }
     const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
     const existingMissingCount = [...myCollection.values()].filter(v=>v.status==='missing').length;
