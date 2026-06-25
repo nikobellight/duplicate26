@@ -480,7 +480,7 @@ function renderAuth(){
     <div class="center-screen"><div class="card">
       ${BADGE26_SVG}
       <h2>${isJoin?'Welcome':'Log in'}</h2>
-      <p class="sub">${isJoin?`A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who in the office can complete it.`:`Welcome back to ${APP_NAME}'26 — the office's World Cup sticker trading board. Enter your pseudo and password.`}</p>
+      <p class="sub">${isJoin?`A free, private trading board for the World Cup 2026 sticker album. Paste what's missing from your <strong>Sticker Album 2026</strong> app export, see who can help complete it.`:`Welcome back to ${APP_NAME}'26 — the World Cup 2026 sticker trading board. Enter your pseudo and password.`}</p>
       <div class="field"><label>Pseudo</label><input type="text" id="authPseudo" placeholder="e.g. Nico"></div>
       <div class="field"><label>Password</label><input type="password" id="authPassword" placeholder="••••••••"></div>
       <button class="btn full" id="authBtn">${isJoin?`Join ${APP_NAME}'26`:'Log in'}</button>
@@ -1283,7 +1283,7 @@ async function renderMyTrades(main){
 
 /* ============================================================ MOST WANTED ============================================================ */
 async function renderWanted(main){
-  main.innerHTML = `<div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li>Shows <strong>your duplicates</strong> ranked by how many people in the office are missing them</li><li>The higher the number, the more valuable that card is to trade right now</li><li>Click <strong>Trade →</strong> to go straight to the Trade Board with that person</li></ul></div><div class="panel"><h2>Most Wanted</h2><div class="loading">Crunching the numbers…</div></div>`;
+  main.innerHTML = `<div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li><strong>Your Most Wanted</strong> — your duplicates ranked by how many people need them. Click Trade → to go straight there.</li><li><strong>Most Wanted</strong> — stickers the most people are missing — with who has them.</li></ul></div><div class="panel"><h2>Most Wanted</h2><div class="loading">Crunching the numbers…</div></div>`;
   await loadAllMembers();
 
   // Build demand map: code -> list of members missing it (excluding yourself)
@@ -1298,35 +1298,67 @@ async function renderWanted(main){
     }
   }
 
-  // Only show YOUR duplicates, ranked by how many people need them
-  const rows = [];
+  // Section 1: YOUR duplicates ranked by demand
+  const myRows = [];
   for (const [code, v] of myCollection.entries()){
     if (v.status !== 'duplicate') continue;
     const neededBy = demand.get(code) || [];
     if (neededBy.length === 0) continue;
-    rows.push({ code, parallel: v.parallel||'normal', count: v.count, neededBy });
+    myRows.push({ code, parallel: v.parallel||'normal', count: v.count, neededBy });
   }
-  rows.sort((a,b) => b.neededBy.length - a.neededBy.length || Math.random()-0.5);
+  myRows.sort((a,b) => b.neededBy.length - a.neededBy.length || Math.random()-0.5);
+
+  // Section 2: Office-wide most missing (all members, any code)
+  const activeMembers = allMembers.filter(m=>m.collection.size>0).length;
+
+  // Build "who has it" map for general section: code -> members with that duplicate
+  const whoHasIt = new Map();
+  for (const m of allMembers){
+    for (const [code, v] of m.collection.entries()){
+      if (v.status === 'duplicate'){
+        if (!whoHasIt.has(code)) whoHasIt.set(code, []);
+        whoHasIt.get(code).push(m);
+      }
+    }
+  }
+  const generalRows = [...demand.entries()]
+    .map(([code, members])=>({ code, count: members.length, holders: whoHasIt.get(code)||[] }))
+    .sort((a,b)=> b.count - a.count || Math.random()-0.5)
+    .slice(0, 15);
 
   document.getElementById('main').innerHTML = `
-    <div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li>Shows <strong>your duplicates</strong> ranked by how many people in the office are missing them</li><li>The higher the number, the more valuable that card is to trade right now</li><li>Click <strong>Trade →</strong> to go straight to the Trade Board with that person</li></ul></div>
-    <div class="panel">
-      <h2>Most Wanted</h2>
-      <p class="lead">Your duplicates that people need most — ranked by demand.</p>
-      ${rows.length===0?'<p class="empty-note">None of your duplicates are needed by anyone right now — check back after more people import.</p>':
-      rows.map(r=>`
-        <div class="panel" style="margin-bottom:12px;padding:14px 16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-            <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${r.code}${r.count>1?` (${r.count}x)`:''}</span>
-            <span class="count">${r.neededBy.length} ${r.neededBy.length===1?'person needs':'people need'} it</span>
-          </div>
-          <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
-            ${r.neededBy.map(m=>`
-              <button class="btn ghost" style="padding:5px 12px;font-size:13px;" data-wanted-member="${m.id}">
-                ${m.pseudo} — Trade →
-              </button>`).join('')}
-          </div>
-        </div>`).join('')}
+    <div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li><strong>Your Most Wanted</strong> — your duplicates ranked by how many people need them, with Trade → buttons.</li><li><strong>Most Wanted</strong> — stickers the most people are missing, with who has them available.</li></ul></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+      <div class="panel">
+        <h2>🎯 Your Most Wanted</h2>
+        <p class="lead">Your duplicates people need most.</p>
+        ${myRows.length===0?'<p class="empty-note">None of your duplicates are needed right now.</p>':
+        myRows.map(r=>`
+          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${r.code}${r.count>1?` (${r.count}x)`:''}</span>
+              <span class="count">${r.neededBy.length} need it</span>
+            </div>
+            <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
+              ${r.neededBy.map(m=>`<button class="btn ghost" style="padding:4px 10px;font-size:12px;" data-wanted-member="${m.id}">${m.pseudo} →</button>`).join('')}
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="panel">
+        <h2>🌍 Most Wanted</h2>
+        <p class="lead">Most missing — who can supply them.</p>
+        ${generalRows.length===0?'<p class="empty-note">Not enough data yet.</p>':
+        generalRows.map(r=>`
+          <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;${r.holders.some(m=>m.id===profile.id)?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 80%);border-color:var(--yellow-deep);':''}">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <strong>${r.code}</strong>
+              <span class="count">${r.count} need it</span>
+            </div>
+            ${r.holders.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
+              ${r.holders.map(m=>`<button class="btn ghost" style="padding:4px 10px;font-size:12px;${m.id===profile.id?'background:var(--yellow);border-color:var(--yellow-deep);':''}" data-wanted-member="${m.id}">${m.id===profile.id?'You →':m.pseudo+' →'}</button>`).join('')}
+            </div>`:'<p class="empty-note" style="margin:6px 0 0;font-size:12px;">No one has a spare yet.</p>'}
+          </div>`).join('')}
+      </div>
     </div>`;
 
   document.querySelectorAll('[data-wanted-member]').forEach(btn=>{
@@ -1352,13 +1384,13 @@ async function renderSearch(main){
       <h3>🔍 How Find a sticker works</h3>
       <ul>
         <li>Type a <strong>sticker code</strong> (e.g. FRA17, CC6, FWC9)</li>
-        <li>Instantly see <strong>who in the office has a spare</strong> of that card</li>
+        <li>Instantly see <strong>who has a spare</strong> of that card</li>
         <li>Click <strong>Trade →</strong> to jump straight to the Trade Board with that person pre-selected</li>
       </ul>
     </div>
     <div class="panel">
       <h2>Find a sticker</h2>
-      <p class="lead">Type a code (e.g. FRA17) to see who in the office has a duplicate. Click their name to go straight to trading with them.</p>
+      <p class="lead">Type a code (e.g. FRA17) to see who has a duplicate. Click their name to go straight to trading with them.</p>
       <input type="text" id="searchInput" placeholder="e.g. FRA17, MEX3, FWC9…">
       <div id="searchResults" style="margin-top:18px;"></div>
     </div>`;
