@@ -291,6 +291,79 @@ function parseExport(text, forceContext){
   return { missing:[...missing], duplicates, unmatched };
 }
 
+// PaniniTrade format parser — handles messy multi-line, split entries, special chars
+function parsePaniniTrade(text){
+  const TEAM_MAP = { 'INTRO':'FWC', 'GER':'GER', 'ENG':'ENG' }; // passthrough + overrides
+  const missing = new Set();
+  const duplicates = {};
+  let isDuplicate = false;
+  let currentTeam = null;
+
+  // Pre-process: join wrapped lines — if a line starts with (x or just digits/commas, merge with previous
+  const rawLines = text.split('\n');
+  const lines = [];
+  for (const raw of rawLines){
+    const t = raw.trim();
+    if (!t) continue;
+    // Line is a continuation if it starts with (x, digits, or comma
+    if (lines.length > 0 && /^[\(\d,\s]/.test(t) && !/^[A-Z]{2,5}/.test(t)){
+      lines[lines.length-1] += ', ' + t;
+    } else {
+      lines.push(t);
+    }
+  }
+
+  for (const line of lines){
+    if (!line) continue;
+    if (line.startsWith('http') || line.startsWith('www.')) continue;
+    const lower = line.toLowerCase();
+    if (lower.includes('missing') && lower.includes('-')) { isDuplicate = false; continue; }
+    if (lower.includes('duplicate') && lower.includes('-')) { isDuplicate = true; continue; }
+
+    // Extract team code: letters at start, ignore trailing junk like **, €, +, spaces
+    // Handles: "KOR :", "AUS**:", "TUR € :", "CAN", "INTRO:"
+    const teamLine = line.match(/^([A-Z]{2,5})\s*[^A-Z\d:]*:?\s*(.*)/);
+    if (teamLine){
+      let rawTeam = teamLine[1];
+      let rawNums = teamLine[2].trim();
+      let team = TEAM_MAP[rawTeam] || rawTeam;
+      if (MASTER_BY_CODE.has(team+'1') || MASTER.some(s=>s.team===team)){
+        currentTeam = team;
+        if (rawNums) extractPaniniNums(rawNums, team, isDuplicate, missing, duplicates);
+        continue;
+      }
+    }
+
+    // Orphaned colon line or bare numbers — attach to currentTeam
+    if (currentTeam){
+      const orphan = line.match(/^:?\s*([\d,\s\(x\)]+)$/i);
+      if (orphan) extractPaniniNums(orphan[1], currentTeam, isDuplicate, missing, duplicates);
+    }
+  }
+  return { missing:[...missing], duplicates, unmatched:[] };
+}
+
+function extractPaniniNums(text, team, isDuplicate, missing, duplicates){
+  const tokens = text.split(',').map(t=>t.trim()).filter(Boolean);
+  for (const tok of tokens){
+    // "10 (x2)" or "10(x2)" or just "10"
+    const withCount = tok.match(/(\d+)\s*\(x(\d+)\)/i);
+    const justNum = tok.match(/^(\d+)$/);
+    if (withCount){
+      const code = `${team}${parseInt(withCount[1])}`;
+      const count = parseInt(withCount[2]);
+      if (!MASTER_BY_CODE.has(code)) continue;
+      if (isDuplicate) duplicates[code] = (duplicates[code]||0) + count;
+      else missing.add(code);
+    } else if (justNum){
+      const code = `${team}${parseInt(justNum[1])}`;
+      if (!MASTER_BY_CODE.has(code)) continue;
+      if (isDuplicate) duplicates[code] = (duplicates[code]||0) + 1;
+      else missing.add(code);
+    }
+  }
+}
+
 function buildCollectionMap(missing, duplicates){
   const map = new Map();
   for (const s of MASTER){
@@ -530,21 +603,33 @@ function renderImport(main){
       <div style="height:14px;"></div>
       <label>Duplicate stickers list</label>
       <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
+      <div style="height:18px;border-top:1px solid var(--line);margin-top:18px;"></div>
+      <label>PaniniTrade.com export <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(optional — paste the full export from paninitrade.com instead)</span></label>
+      <textarea class="import-box" id="importPaniniTrade" placeholder="Paste your PaniniTrade export here (missing + duplicates together)…" style="min-height:120px;"></textarea>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
     const missingText = document.getElementById('importMissing').value.trim();
     const dupText = document.getElementById('importDuplicates').value.trim();
+    const paniniText = document.getElementById('importPaniniTrade').value.trim();
     const hasMissing = missingText.length > 0;
     const hasDup = dupText.length > 0;
-    if (!hasMissing && !hasDup){
+    const hasPanini = paniniText.length > 0;
+    if (!hasMissing && !hasDup && !hasPanini){
       document.getElementById('previewArea').innerHTML = `<div class="msg err">Paste at least one list before parsing.</div>`;
       return;
     }
-    const mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
-    const text = missingText + '\n' + dupText;
-    const result = parseExport(text);
+    let result;
+    if (hasPanini){
+      result = parsePaniniTrade(paniniText);
+    } else {
+      const mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
+      const text = missingText + '\n' + dupText;
+      result = parseExport(text);
+      result.mode = mode;
+    }
+    const mode = result.mode || 'both';
     const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
     const existingMissingCount = [...myCollection.values()].filter(v=>v.status==='missing').length;
     const dupTypes = Object.keys(result.duplicates).length;
@@ -1175,17 +1260,16 @@ async function renderMyTrades(main){
           </div>
           <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
             <div class="count" style="text-transform:capitalize;">${t.status}</div>
-            ${t.status==='completed'?`<button class="btn ghost" data-cancel="${t.id}" style="padding:5px 10px;font-size:12px;">Cancel</button>`:''}
+            ${t.status==='completed'?'':''}
             <button class="btn ghost" data-delete-history="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
           </div>
         </div>`;
       }).join('')}
     </div>`;
-  document.querySelectorAll('[data-accept]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.approve));
-  document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>handleAccept(b.dataset.approve));
-  document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.reject,'rejected'));
-  document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>handleRespond(b.dataset.cancel,'cancelled'));
-  document.querySelectorAll('[data-complete]').forEach(b=>b.onclick=()=>handleComplete(b.dataset.complete));
+  document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleAccept(b.dataset.approve); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
+  document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleRespond(b.dataset.reject,'rejected'); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
+  document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleRespond(b.dataset.cancel,'cancelled'); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
+  document.querySelectorAll('[data-complete]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleComplete(b.dataset.complete); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
   document.querySelectorAll('[data-delete-history]').forEach(btn=>{
     btn.onclick = async ()=>{
       btn.disabled=true; btn.textContent='…';
@@ -1201,37 +1285,68 @@ async function renderMyTrades(main){
 
 /* ============================================================ MOST WANTED ============================================================ */
 async function renderWanted(main){
-  main.innerHTML = `<div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li>Shows stickers that <strong>multiple people</strong> in the office are missing at the same time</li><li><strong>Highlighted in yellow</strong> = you have a duplicate of that card — you could be the hero</li><li>The list gets more relevant as more people import their albums</li></ul></div><div class="panel"><h2>Most Wanted</h2><div class="loading">Crunching the numbers…</div></div>`;
+  main.innerHTML = `<div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li>Shows <strong>your duplicates</strong> ranked by how many people in the office are missing them</li><li>The higher the number, the more valuable that card is to trade right now</li><li>Click <strong>Trade →</strong> to go straight to the Trade Board with that person</li></ul></div><div class="panel"><h2>Most Wanted</h2><div class="loading">Crunching the numbers…</div></div>`;
   await loadAllMembers();
-  const demand = new Map(); // code -> count of people missing it
+
+  // Build demand map: code -> list of members missing it (excluding yourself)
+  const demand = new Map();
   for (const m of allMembers){
+    if (m.id === profile.id) continue;
     for (const [code, v] of m.collection.entries()){
-      if (v.status === 'missing') demand.set(code, (demand.get(code)||0) + 1);
+      if (v.status === 'missing'){
+        if (!demand.has(code)) demand.set(code, []);
+        demand.get(code).push(m);
+      }
     }
   }
-  const activeMembers = allMembers.filter(m=>m.collection.size>0).length;
-  const threshold = Math.max(2, Math.ceil(activeMembers * 0.4));
-  const allRows = [...demand.entries()]
-    .map(([code,count])=>({ code, count, iHaveDupe: (myCollection.get(code)||{}).status==='duplicate' }))
-    .sort((a,b)=> b.count - a.count || Math.random()-0.5);
-  const relevantRows = allRows.filter(r=>r.count>=threshold);
-  const rows = relevantRows.slice(0, 12);
+
+  // Only show YOUR duplicates, ranked by how many people need them
+  const rows = [];
+  for (const [code, v] of myCollection.entries()){
+    if (v.status !== 'duplicate') continue;
+    const neededBy = demand.get(code) || [];
+    if (neededBy.length === 0) continue;
+    rows.push({ code, parallel: v.parallel||'normal', count: v.count, neededBy });
+  }
+  rows.sort((a,b) => b.neededBy.length - a.neededBy.length || Math.random()-0.5);
 
   document.getElementById('main').innerHTML = `
+    <div class="help-box"><h3>🔥 How Most Wanted works</h3><ul><li>Shows <strong>your duplicates</strong> ranked by how many people in the office are missing them</li><li>The higher the number, the more valuable that card is to trade right now</li><li>Click <strong>Trade →</strong> to go straight to the Trade Board with that person</li></ul></div>
     <div class="panel">
       <h2>Most Wanted</h2>
-      <p class="lead">Stickers at least ${threshold} people in the office are missing right now (out of ${activeMembers} who've imported). Ones you can supply are highlighted.</p>
-      ${activeMembers<5?`<div class="msg info">With only ${activeMembers} people in so far, early collections naturally overlap a lot — this list gets a lot more selective as more people join.</div>`:''}
-      ${rows.length===0?'<p class="empty-note">Nothing stands out yet — this fills in once more people import their albums and overlap shows up.</p>':
+      <p class="lead">Your duplicates that people need most — ranked by demand.</p>
+      ${rows.length===0?'<p class="empty-note">None of your duplicates are needed by anyone right now — check back after more people import.</p>':
       rows.map(r=>`
-        <div class="search-result-row" style="${r.iHaveDupe?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 85%);border-color:var(--yellow-deep);':''}">
-          <div>${r.code}${r.iHaveDupe?' <span class="badge-pill promo" style="background:var(--red);color:#fff;">YOU HAVE THIS</span>':''}</div>
-          <div class="count">${r.count} people need it</div>
+        <div class="panel" style="margin-bottom:12px;padding:14px 16px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+            <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${r.code}${r.count>1?` (${r.count}x)`:''}</span>
+            <span class="count">${r.neededBy.length} ${r.neededBy.length===1?'person needs':'people need'} it</span>
+          </div>
+          <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;">
+            ${r.neededBy.map(m=>`
+              <button class="btn ghost" style="padding:5px 12px;font-size:13px;" data-wanted-member="${m.id}">
+                ${m.pseudo} — Trade →
+              </button>`).join('')}
+          </div>
         </div>`).join('')}
-      ${relevantRows.length>12?`<p class="example" style="margin-top:14px;">Showing the top 12, out of ${relevantRows.length} stickers currently wanted by ${threshold}+ people.</p>`:''}
     </div>`;
-}
 
+  document.querySelectorAll('[data-wanted-member]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const member = allMembers.find(m=>m.id===btn.dataset.wantedMember);
+      if (!member) return;
+      selectedTradeMember = member;
+      tradeSelection = { give: new Set(), get: new Set() };
+      sentDealsThisSession = [];
+      currentTab = 'trade';
+      renderShell();
+      setTimeout(async ()=>{
+        const builderPanel = document.getElementById('builderPanel');
+        if (builderPanel){ await renderTradeBuilder(); builderPanel.scrollIntoView({behavior:'smooth', block:'start'}); }
+      }, 100);
+    };
+  });
+}
 
 async function renderSearch(main){
   main.innerHTML = `
