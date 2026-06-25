@@ -1444,26 +1444,33 @@ async function renderMembers(main){
     return {pseudo:m.pseudo, pct, dup, isMe:m.id===profile.id};
   }).sort((a,b)=>b.pct-a.pct);
 
-  const pctMedals = ['🥇','🥈','🥉'];
   const dupRanked = [...rows].sort((a,b)=>b.dup-a.dup);
-  const dupMedal = (pseudo) => {
-    const idx = dupRanked.findIndex(r=>r.pseudo===pseudo);
-    return idx < 3 && dupRanked[idx].dup > 0 ? pctMedals[idx] : '';
+
+  const rankIcon = (i, val) => {
+    if (val === 0) return '';
+    if (i === 0) return '🏆';
+    if (i === 1) return '🥈';
+    if (i === 2) return '🥉';
+    return `${i+1}.`;
   };
 
   document.getElementById('main').innerHTML = `
-    <div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🥇🥈🥉 medals go to the top 3 in each category</li></ul></div>
+    <div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🏆🥈🥉 for top 3, numbers for the rest</li></ul></div>
     <div class="panel">
       <h2>Members (${rows.length})</h2>
       <table class="members-table">
-        <thead><tr><th></th><th>Name</th><th>Complete</th><th>Duplicates</th></tr></thead>
-        <tbody>${rows.map((r,i)=>`
-          <tr style="${r.isMe?'background:var(--blue-soft);':''}">
-            <td style="font-size:18px;width:32px;">${i<3 && r.pct>0 ? pctMedals[i] : ''}</td>
-            <td style="font-weight:${r.isMe?'700':'400'};">${r.pseudo}${r.isMe?' (you)':''}</td>
+        <thead><tr><th style="width:40px;text-align:center;">#</th><th>Name</th><th>Complete</th><th style="text-align:right;">Duplicates</th><th style="width:40px;text-align:center;">#</th></tr></thead>
+        <tbody>${rows.map((r,i)=>{
+          const dupIdx = dupRanked.findIndex(d=>d.pseudo===r.pseudo);
+          return `
+          <tr style="${r.isMe?'background:var(--blue-soft);font-weight:700;':''}">
+            <td style="text-align:center;font-size:${i<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(i, r.pct)}</td>
+            <td>${r.pseudo}${r.isMe?' (you)':''}</td>
             <td class="mono">${r.pct}%</td>
-            <td class="mono">${dupMedal(r.pseudo)} ${r.dup}</td>
-          </tr>`).join('')}
+            <td class="mono" style="text-align:right;">${r.dup}</td>
+            <td style="text-align:center;font-size:${dupIdx<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(dupIdx, r.dup)}</td>
+          </tr>`;
+        }).join('')}
         </tbody>
       </table>
     </div>`;
