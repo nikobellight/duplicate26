@@ -647,9 +647,10 @@ function renderImport(main){
       return;
     }
     let result = { missing:[], duplicates:{}, mode:'both' };
+    let mode = 'both';
     // MoovTech boxes
     if (hasMissing || hasDup){
-      const mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
+      mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
       const r = parseExport(missingText + '\n' + dupText);
       result.missing = [...new Set([...result.missing, ...r.missing])];
       Object.assign(result.duplicates, r.duplicates);
