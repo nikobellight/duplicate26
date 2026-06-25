@@ -637,10 +637,20 @@ function renderAlbum(main){
         <button class="btn ghost" data-status="all" style="padding:8px 14px;">All</button>
         <button class="btn ghost" data-status="duplicate" style="padding:8px 14px;">My duplicates</button>
         <button class="btn ghost" data-status="missing" style="padding:8px 14px;">Missing only</button>
+        ${statusFilter==='duplicate'?`<button class="btn ghost" id="markAllBlueBtn" style="padding:8px 14px;background:var(--blue);color:#fff;border-color:var(--blue);">🔵 All blue</button>`:''}
       </div>
       <div id="groupsHolder"></div>
     </div>`;
   renderGroups();
+  if (statusFilter==='duplicate'){
+    const blueBtn = document.getElementById('markAllBlueBtn');
+    if (blueBtn) blueBtn.onclick = async ()=>{
+      blueBtn.disabled = true; blueBtn.textContent = 'Applying…';
+      const dupes = [...myCollection.entries()].filter(([,v])=>v.status==='duplicate');
+      for (const [code] of dupes) await setStickerParallel(code, 'blue');
+      renderAlbum(document.getElementById('main'));
+    };
+  }
   document.getElementById('teamFilter').oninput = (e)=>renderGroups(e.target.value.trim().toLowerCase());
   document.querySelectorAll('[data-status]').forEach(b=>{
     b.style.background = b.dataset.status===statusFilter ? 'var(--ink)' : 'transparent';
