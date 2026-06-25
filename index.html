@@ -293,11 +293,11 @@ function parseExport(text, forceContext){
 }
 
 // PaniniTrade format parser — handles messy multi-line, split entries, special chars
-function parsePaniniTrade(text){
+function parsePaniniTrade(text, forceContext){
   const TEAM_MAP = { 'INTRO':'FWC', 'GER':'GER', 'ENG':'ENG' };
   const missing = new Set();
   const duplicates = {};
-  let isDuplicate = false;
+  let isDuplicate = forceContext === 'duplicate';
   let currentTeam = null;
 
   // Pre-process: join wrapped lines
@@ -317,23 +317,25 @@ function parsePaniniTrade(text){
     if (!line) continue;
     if (line.startsWith('http') || line.startsWith('www.')) continue;
 
-    // Check for section switch — may appear mid-line after some data
-    // e.g. "NZL: 4, 7, 10, 13          DUPLICATES - 2026 USA MEX CAN:"
-    const missingIdx = line.search(/MISSING\s*-/i);
-    const dupIdx = line.search(/DUPLICATE[S]?\s*-/i);
-
-    if (dupIdx !== -1){
-      // Process any data before the DUPLICATES marker first
-      const before = line.slice(0, dupIdx).trim();
-      if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
-      isDuplicate = true;
-      continue;
-    }
-    if (missingIdx !== -1){
-      const before = line.slice(0, missingIdx).trim();
-      if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
-      isDuplicate = false;
-      continue;
+    // Only detect section switches when context is NOT forced (combined paste box)
+    if (!forceContext){
+      const dupIdx = line.search(/DUPLICATE[S]?\s*-/i);
+      const missingIdx = line.search(/MISSING\s*-/i);
+      if (dupIdx !== -1){
+        const before = line.slice(0, dupIdx).trim();
+        if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
+        isDuplicate = true;
+        continue;
+      }
+      if (missingIdx !== -1){
+        const before = line.slice(0, missingIdx).trim();
+        if (before) processPaniniLine(before, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
+        isDuplicate = false;
+        continue;
+      }
+    } else {
+      // With forced context, skip any section header lines entirely
+      if (/DUPLICATE[S]?\s*-/i.test(line) || /MISSING\s*-/i.test(line)) continue;
     }
 
     processPaniniLine(line, isDuplicate, currentTeam, missing, duplicates, TEAM_MAP, ct => currentTeam = ct);
@@ -610,7 +612,7 @@ function renderImport(main){
       <h3>📲 How to import</h3>
       <ol>
         <li><strong>Option 1 — Sticker Album 2026 app (MoovTech):</strong> share your missing list → paste in the first box, share your duplicate list → paste in the second box. You can paste one or both — whichever box you fill in gets updated, the other stays untouched.</li>
-        <li><strong>Option 2 — PaniniTrade.com:</strong> copy your full export from paninitrade.com (missing + duplicates together) and paste it in the third box at the bottom.</li>
+        <li><strong>Option 2 — PaniniTrade.com:</strong> paste the MISSING section in the "PaniniTrade Missing" box and the DUPLICATES section in the "PaniniTrade Duplicates" box separately below.</li>
         <li>Hit <strong>Parse</strong> to preview, then <strong>Save</strong>.</li>
       </ol>
     </div>
@@ -623,32 +625,47 @@ function renderImport(main){
       <label>Duplicate stickers list</label>
       <textarea class="import-box" id="importDuplicates" placeholder="Paste your DUPLICATE stickers export here…" style="min-height:100px;"></textarea>
       <div style="height:18px;border-top:1px solid var(--line);margin-top:18px;"></div>
-      <label>PaniniTrade.com export <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(optional — paste the full export from paninitrade.com instead)</span></label>
-      <textarea class="import-box" id="importPaniniTrade" placeholder="Paste your PaniniTrade export here (missing + duplicates together)…" style="min-height:120px;"></textarea>
+      <label>PaniniTrade.com — Missing <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(paste only the MISSING section from paninitrade.com)</span></label>
+      <textarea class="import-box" id="importPaniniMissing" placeholder="Paste your PaniniTrade MISSING section here…" style="min-height:100px;"></textarea>
+      <div style="height:10px;"></div>
+      <label>PaniniTrade.com — Duplicates <span style="font-weight:400;text-transform:none;letter-spacing:normal;color:var(--mist-soft);font-size:12px;">(paste only the DUPLICATES section from paninitrade.com)</span></label>
+      <textarea class="import-box" id="importPaniniDuplicates" placeholder="Paste your PaniniTrade DUPLICATES section here…" style="min-height:100px;"></textarea>
       <div style="margin-top:14px;"><button class="btn" id="parseBtn">Parse</button></div>
       <div class="preview" id="previewArea"></div>
     </div>`;
   document.getElementById('parseBtn').onclick = ()=>{
     const missingText = document.getElementById('importMissing').value.trim();
     const dupText = document.getElementById('importDuplicates').value.trim();
-    const paniniText = document.getElementById('importPaniniTrade').value.trim();
+    const paniniMissingText = document.getElementById('importPaniniMissing').value.trim();
+    const paniniDupText = document.getElementById('importPaniniDuplicates').value.trim();
     const hasMissing = missingText.length > 0;
     const hasDup = dupText.length > 0;
-    const hasPanini = paniniText.length > 0;
-    if (!hasMissing && !hasDup && !hasPanini){
+    const hasPaniniMissing = paniniMissingText.length > 0;
+    const hasPaniniDup = paniniDupText.length > 0;
+    if (!hasMissing && !hasDup && !hasPaniniMissing && !hasPaniniDup){
       document.getElementById('previewArea').innerHTML = `<div class="msg err">Paste at least one list before parsing.</div>`;
       return;
     }
-    let result;
-    if (hasPanini){
-      result = parsePaniniTrade(paniniText);
-    } else {
+    let result = { missing:[], duplicates:{}, mode:'both' };
+    // MoovTech boxes
+    if (hasMissing || hasDup){
       const mode = hasMissing && hasDup ? 'both' : hasMissing ? 'missing-only' : 'duplicates-only';
-      const text = missingText + '\n' + dupText;
-      result = parseExport(text);
+      const r = parseExport(missingText + '\n' + dupText);
+      result.missing = [...new Set([...result.missing, ...r.missing])];
+      Object.assign(result.duplicates, r.duplicates);
       result.mode = mode;
     }
-    const mode = result.mode || 'both';
+    // PaniniTrade boxes — force context per box
+    if (hasPaniniMissing){
+      const r = parsePaniniTrade(paniniMissingText, 'missing');
+      result.missing = [...new Set([...result.missing, ...r.missing])];
+    }
+    if (hasPaniniDup){
+      const r = parsePaniniTrade(paniniDupText, 'duplicate');
+      Object.entries(r.duplicates).forEach(([code,count])=>{
+        result.duplicates[code] = (result.duplicates[code]||0) + count;
+      });
+    }
     const existingDupTypes = [...myCollection.values()].filter(v=>v.status==='duplicate').length;
     const existingMissingCount = [...myCollection.values()].filter(v=>v.status==='missing').length;
     const dupTypes = Object.keys(result.duplicates).length;
