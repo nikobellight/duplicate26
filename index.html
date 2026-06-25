@@ -859,13 +859,13 @@ async function renderTradeBoard(main){
               </div>`).join('')}
           </div>
         </div>
-        <div class="panel" style="padding:14px;margin-top:0;" id="tradeBoardHistory">
-          <div class="loading" style="padding:10px 0;font-size:13px;">Loading…</div>
-        </div>
       </div>
       <div id="builderPanel" class="panel" style="min-height:200px;">
         <p class="empty-note" style="text-align:center;padding:40px 0;">← Select a person to start trading</p>
       </div>
+    </div>
+    <div class="panel" id="tradeBoardHistory" style="margin-top:0;">
+      <div class="loading" style="padding:20px 0;">Loading proposals…</div>
     </div>`;
 
   document.getElementById('memberList').querySelectorAll('.member-row').forEach(row=>{
@@ -1360,7 +1360,7 @@ async function renderWanted(main){
         generalRows.map(r=>`
           <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;${r.holders.some(m=>m.id===profile.id)?'background:linear-gradient(135deg,#FFF9B0,var(--yellow) 80%);border-color:var(--yellow-deep);':''}">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-              <strong>${r.code}</strong>
+              <span class="sticker" style="border:1.5px solid var(--ink);font-size:12px;">${r.code}</span>
               <span class="count">${r.count} need it</span>
             </div>
             ${r.holders.length?`<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
