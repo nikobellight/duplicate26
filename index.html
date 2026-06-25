@@ -175,7 +175,7 @@
   .help-box .help-toggle{background:none;border:none;color:var(--blue-deep);font-weight:700;font-size:13px;cursor:pointer;padding:0;text-decoration:underline;}
   .help-body{margin-top:10px;}
 
-  @media (max-width:600px){
+  @media (max-width:768px){
     .detail .cols{grid-template-columns:1fr;}
     .topbar{flex-direction:column;align-items:flex-start;}
     .member-row{flex-wrap:wrap;gap:8px;}
@@ -187,6 +187,7 @@
     nav.tabs button{font-size:12px;padding:6px 8px 5px;}
     .trade-header-cols{grid-template-columns:80px 1fr 1fr;}
     .trade-team-label{font-size:11px;}
+    .trade-board-grid{grid-template-columns:1fr !important;}
   }
   .indicator-symbol{font-size:14px;line-height:1;}
 </style>
@@ -831,46 +832,55 @@ async function renderTradeBoard(main){
     return { member:m, youGet, youGive, total: youGet.length+youGive.length };
   }).filter(x=>x.member.collection.size>0).sort((a,b)=>b.total-a.total);
 
-  const main2 = document.getElementById('main');
-  main2.innerHTML = `
+  document.getElementById('main').innerHTML = `
     <div class="help-box">
       <h3>🔄 How the Trade Board works</h3>
       <ol>
-        <li>Click a <strong>person's name</strong> below — a builder panel opens at the top</li>
-        <li>Left column = <strong>your duplicates</strong>, right column = <strong>their duplicates</strong></li>
-        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need that card &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need that card &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already promised in another deal</li>
-        <li>Click cards to <strong>select them</strong> for the proposal, then hit <strong>Send trade proposal</strong></li>
-        <li>Each send is <strong>one separate deal</strong> — send, then start fresh for the next one</li>
-        <li>If someone imports new packs, hit <strong>↻ Refresh</strong> to see their updated duplicates</li>
+        <li>Click a name on the left — the builder opens on the right</li>
+        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already in another deal</li>
+        <li>Click cards to select, then <strong>Send trade proposal</strong></li>
       </ol>
     </div>
-    <div class="panel" id="builderPanel" style="display:none;position:sticky;top:66px;z-index:10;"></div>
-    <div class="panel">
-      <h2>Trade Board</h2>
-      <p class="lead">Click anyone below — the trade builder opens above, grouped by team. <button class="btn ghost" id="refreshTB" style="padding:4px 10px;font-size:12px;display:inline-flex;">↻ Refresh</button></p>
-      <div id="memberList"></div>
-      ${matches.length===0?'<p class="empty-note">No one else has imported their album yet — share the link!</p>':''}
-    </div>
-    <div class="panel" id="tradeBoardHistory"><div class="loading" style="padding:20px 0;">Loading proposal history…</div></div>`;
-  const list = document.getElementById('memberList');
-  list.innerHTML = matches.map(x=>`
-    <div class="member-row" data-id="${x.member.id}">
-      <div class="name">${x.member.pseudo}</div>
-      <div class="match-counts"><span class="get">↓ ${x.youGet.length} possible</span><span class="give">↑ ${x.youGive.length} possible</span></div>
-    </div>`).join('');
-  list.querySelectorAll('.member-row').forEach(row=>{
+    <div style="display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start;">
+      <div>
+        <div class="panel" style="padding:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <strong style="font-size:14px;">Members</strong>
+            <button class="btn ghost" id="refreshTB" style="padding:3px 8px;font-size:11px;">↻</button>
+          </div>
+          <div id="memberList">
+            ${matches.length===0?'<p class="empty-note">No one has imported yet.</p>':
+            matches.map(x=>`
+              <div class="member-row" data-id="${x.member.id}" style="padding:10px 10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid var(--line);">
+                <div class="name" style="font-size:14px;">${x.member.pseudo}</div>
+                <div class="match-counts" style="font-size:11px;margin-top:2px;">
+                  <span class="get">↓ ${x.youGet.length}</span>&nbsp;<span class="give">↑ ${x.youGive.length}</span>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div class="panel" style="padding:14px;margin-top:0;" id="tradeBoardHistory">
+          <div class="loading" style="padding:10px 0;font-size:13px;">Loading…</div>
+        </div>
+      </div>
+      <div id="builderPanel" class="panel" style="min-height:200px;">
+        <p class="empty-note" style="text-align:center;padding:40px 0;">← Select a person to start trading</p>
+      </div>
+    </div>`;
+
+  document.getElementById('memberList').querySelectorAll('.member-row').forEach(row=>{
     row.onclick = async ()=>{
+      document.querySelectorAll('#memberList .member-row').forEach(r=>r.style.background='');
+      row.style.background = 'var(--blue-soft)';
       const x = matches.find(m=>m.member.id===row.dataset.id);
       selectedTradeMember = x.member;
       tradeSelection = { give: new Set(), get: new Set() };
       sentDealsThisSession = [];
       await renderTradeBuilder();
       renderTradeBoardHistory(x.member);
-      document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
     };
   });
-  const histEl = document.getElementById('tradeBoardHistory');
-  if (histEl) await renderTradeBoardHistory(null); // show all proposals on load
+  await renderTradeBoardHistory(null);
   const refreshBtn = document.getElementById('refreshTB');
   if (refreshBtn) refreshBtn.onclick = ()=>renderTradeBoard(document.getElementById('main'));
 }
@@ -937,7 +947,7 @@ async function renderTradeBuilder(){
   const member = selectedTradeMember;
   const prevTG = document.getElementById('tradeGroups');
   const prevScroll = prevTG ? prevTG.scrollTop : 0;
-  panel.style.display = 'block';
+  panel.scrollIntoView({behavior:'smooth', block:'nearest'});
 
   // Fetch active proposals (pending + accepted) for both sides to detect conflicts
   const { data: activeProposals } = await sb.from('trade_proposals')
@@ -988,7 +998,6 @@ async function renderTradeBuilder(){
   panel.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
       <h2 style="font-size:18px;">Trade with ${member.pseudo}</h2>
-      <button class="btn ghost" id="closeBuilderBtn" style="padding:6px 12px;">Close</button>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
     <p class="example" style="margin:-2px 0 8px;"><span class="indicator-symbol" style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it &nbsp;·&nbsp; <span class="indicator-symbol" style="color:orange;font-weight:900;">⚠</span> = already promised in another deal</p>
@@ -1042,7 +1051,7 @@ async function renderTradeBuilder(){
     <button class="btn full" id="sendProposalBtn" style="margin-top:12px;" ${(giveList.length===0 && getList.length===0)?'disabled':''}>Send trade proposal</button>
     <p class="example" style="margin-top:8px;">Each "Send" creates one separate deal — pick everything for that one trade, send it, then start fresh for a different deal (with this person or anyone else).</p>
     <div id="proposalMsg"></div>`;
-  document.getElementById('closeBuilderBtn').onclick = ()=>{ panel.style.display='none'; selectedTradeMember=null; };
+
   panel.querySelectorAll('.trade-chip').forEach(c=>{
     c.onclick = async ()=>{
       const set = c.dataset.side==='give' ? tradeSelection.give : tradeSelection.get;
