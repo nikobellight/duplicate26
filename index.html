@@ -1435,7 +1435,7 @@ async function renderSearch(main){
 
 /* ============================================================ MEMBERS ============================================================ */
 async function renderMembers(main){
-  main.innerHTML = `<div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total number of spare copies they have available to trade</li><li>Use this to spot who is close to completing their album and might need your help</li></ul></div><div class="panel"><h2>Members</h2><div class="loading">Loading…</div></div>`;
+  main.innerHTML = `<div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🥇🥈🥉 medals go to the top 3 in each category</li></ul></div><div class="panel"><h2>Members</h2><div class="loading">Loading…</div></div>`;
   await loadAllMembers();
   const rows = allMembers.map(m=>{
     let have=0,dup=0;
@@ -1443,12 +1443,28 @@ async function renderMembers(main){
     const pct = m.collection.size? Math.round(100*have/MASTER.length) : 0;
     return {pseudo:m.pseudo, pct, dup, isMe:m.id===profile.id};
   }).sort((a,b)=>b.pct-a.pct);
+
+  const pctMedals = ['🥇','🥈','🥉'];
+  const dupRanked = [...rows].sort((a,b)=>b.dup-a.dup);
+  const dupMedal = (pseudo) => {
+    const idx = dupRanked.findIndex(r=>r.pseudo===pseudo);
+    return idx < 3 && dupRanked[idx].dup > 0 ? pctMedals[idx] : '';
+  };
+
   document.getElementById('main').innerHTML = `
+    <div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🥇🥈🥉 medals go to the top 3 in each category</li></ul></div>
     <div class="panel">
       <h2>Members (${rows.length})</h2>
       <table class="members-table">
-        <thead><tr><th>Name</th><th>Complete</th><th>Duplicates</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr><td>${r.pseudo}${r.isMe?' (you)':''}</td><td class="mono">${r.pct}%</td><td class="mono">${r.dup}</td></tr>`).join('')}</tbody>
+        <thead><tr><th></th><th>Name</th><th>Complete</th><th>Duplicates</th></tr></thead>
+        <tbody>${rows.map((r,i)=>`
+          <tr style="${r.isMe?'background:var(--blue-soft);':''}">
+            <td style="font-size:18px;width:32px;">${i<3 && r.pct>0 ? pctMedals[i] : ''}</td>
+            <td style="font-weight:${r.isMe?'700':'400'};">${r.pseudo}${r.isMe?' (you)':''}</td>
+            <td class="mono">${r.pct}%</td>
+            <td class="mono">${dupMedal(r.pseudo)} ${r.dup}</td>
+          </tr>`).join('')}
+        </tbody>
       </table>
     </div>`;
 }
