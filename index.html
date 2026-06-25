@@ -851,10 +851,10 @@ async function renderTradeBoard(main){
           <div id="memberList">
             ${matches.length===0?'<p class="empty-note">No one has imported yet.</p>':
             matches.map(x=>`
-              <div class="member-row" data-id="${x.member.id}" style="padding:10px 10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid var(--line);">
+              <div class="member-row" data-id="${x.member.id}" style="padding:10px;border-radius:8px;cursor:pointer;margin-bottom:4px;border:1px solid var(--line);flex-direction:column;align-items:flex-start;gap:4px;">
                 <div class="name" style="font-size:14px;">${x.member.pseudo}</div>
-                <div class="match-counts" style="font-size:11px;margin-top:2px;">
-                  <span class="get">↓ ${x.youGet.length}</span>&nbsp;<span class="give">↑ ${x.youGive.length}</span>
+                <div class="match-counts" style="font-size:11px;">
+                  <span class="get">↓ ${x.youGet.length} possible</span>&nbsp;<span class="give">↑ ${x.youGive.length} possible</span>
                 </div>
               </div>`).join('')}
           </div>
