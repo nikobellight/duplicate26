@@ -678,9 +678,22 @@ function renderNumberRows(numbers){
   panel.id = 'numberRowsPanel';
   panel.className = 'panel';
   panel.style.marginTop = '0';
+
+  // Build who-has-it map from allMembers
+  const whoHasDupe = new Map(); // code -> [pseudo, ...]
+  for (const m of allMembers){
+    if (m.id === profile.id) continue;
+    for (const [code, v] of m.collection.entries()){
+      if (v.status === 'duplicate'){
+        if (!whoHasDupe.has(code)) whoHasDupe.set(code, []);
+        whoHasDupe.get(code).push(m.pseudo);
+      }
+    }
+  }
+
   panel.innerHTML = `
     <h2 style="font-size:16px;margin-bottom:4px;">Quick reference — by number</h2>
-    <p class="lead" style="margin-bottom:14px;">All teams' card #1 and #13 at a glance — useful for spotting trades.</p>
+    <p class="lead" style="margin-bottom:14px;">All teams' card #1 and #13 at a glance. Hover to see who has a spare.</p>
     ${numbers.map(n=>{
       const cards = MASTER.filter(s=>s.number===n && s.team!=='FWC' && s.team!=='CC');
       return `
@@ -689,8 +702,11 @@ function renderNumberRows(numbers){
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${cards.map(s=>{
             const v = myCollection.get(s.code)||{status:'have',parallel:'normal'};
-            const style = v.status==='duplicate' ? `background:${v.parallel&&v.parallel!=='normal'?PARALLEL_CHIP_STYLE[v.parallel]?.bg||'var(--yellow)':'var(--yellow)'};` : v.status==='missing'?'opacity:0.35;':'';
-            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${style}" title="${s.code}">${s.code}</span>`;
+            const bg = v.status==='duplicate' ? (v.parallel&&v.parallel!=='normal'?PARALLEL_CHIP_STYLE[v.parallel]?.bg||'var(--yellow)':'var(--yellow)') : '';
+            const style = bg ? `background:${bg};` : v.status==='missing'?'opacity:0.35;':'';
+            const holders = whoHasDupe.get(s.code)||[];
+            const tooltip = holders.length ? `Has spare: ${holders.join(', ')}` : (v.status==='duplicate'?'You have a spare':'');
+            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${style}cursor:default;" title="${tooltip||s.code}">${s.code}</span>`;
           }).join('')}
         </div>
       </div>`;
