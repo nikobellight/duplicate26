@@ -857,6 +857,11 @@ async function renderTradeBoard(main){
     </div>
     <div class="panel" id="tradeBoardHistory" style="margin-top:0;">
       <div class="loading" style="padding:20px 0;">Loading proposals…</div>
+    </div>
+    <div class="panel" id="holoPanel" style="margin-top:0;">
+      <h2>✨ Holo Trades</h2>
+      <p class="lead">FWC cards + all #1s — premium cards people typically trade among themselves. Mutual matches highlighted.</p>
+      <div id="holoList"><div class="loading">Loading…</div></div>
     </div>`;
 
   document.getElementById('memberList').querySelectorAll('.member-row').forEach(row=>{
@@ -872,10 +877,80 @@ async function renderTradeBoard(main){
     };
   });
   await renderTradeBoardHistory(null);
+  renderHoloTrades(matches);
   const refreshBtn = document.getElementById('refreshTB');
   if (refreshBtn) refreshBtn.onclick = ()=>renderTradeBoard(document.getElementById('main'));
 }
 let sentDealsThisSession = [];
+function renderHoloTrades(matches){
+  const el = document.getElementById('holoList');
+  if (!el) return;
+  // Define holo codes: FWC + all team #1s
+  const holoCodes = new Set(MASTER.filter(s=>s.team==='FWC' || s.number===1).map(s=>s.code));
+
+  const rows = matches.map(x=>{
+    const m = x.member;
+    // My holo dupes they need
+    const iGive = [...holoCodes].filter(code=>
+      (myCollection.get(code)||{}).status==='duplicate' &&
+      (m.collection.get(code)||{}).status==='missing'
+    );
+    // Their holo dupes I need
+    const iGet = [...holoCodes].filter(code=>
+      (m.collection.get(code)||{}).status==='duplicate' &&
+      (myCollection.get(code)||{}).status==='missing'
+    );
+    return { member:m, iGive, iGet };
+  }).filter(r=>r.iGive.length>0 || r.iGet.length>0);
+
+  if (!rows.length){
+    el.innerHTML = '<p class="empty-note">No holo matches right now — import more cards to see potential swaps.</p>';
+    return;
+  }
+
+  el.innerHTML = rows.map(r=>{
+    const mutual = r.iGive.length>0 && r.iGet.length>0;
+    return `
+    <div style="border:1.5px solid ${mutual?'var(--yellow-deep)':'var(--line)'};border-radius:10px;padding:14px;margin-bottom:10px;${mutual?'background:linear-gradient(135deg,#FFFBE6,#FFF9B0 80%);':''}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <strong>${r.member.pseudo}</strong>
+        ${mutual?'<span class="badge-pill promo" style="background:var(--yellow-deep);color:var(--ink);">✨ Mutual swap</span>':''}
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">You give</div>
+          <div class="sticker-chips">${r.iGive.length?r.iGive.map(code=>{
+            const v = myCollection.get(code)||{};
+            return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}">${code}</span>`;
+          }).join(''):'<span class="empty-note">—</span>'}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">You get</div>
+          <div class="sticker-chips">${r.iGet.length?r.iGet.map(code=>{
+            const v = r.member.collection.get(code)||{};
+            return `<span class="sticker get" style="${parallelChipStyle(v.parallel)}">${code}</span>`;
+          }).join(''):'<span class="empty-note">—</span>'}</div>
+        </div>
+      </div>
+      ${mutual?`<button class="btn ghost" style="margin-top:10px;font-size:12px;" data-holo-member="${r.member.id}">Open in Trade Board →</button>`:''}
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-holo-member]').forEach(btn=>{
+    btn.onclick = async ()=>{
+      const member = allMembers.find(m=>m.id===btn.dataset.holoMember);
+      if (!member) return;
+      selectedTradeMember = member;
+      tradeSelection = { give: new Set(), get: new Set() };
+      sentDealsThisSession = [];
+      document.querySelectorAll('#memberList .member-row').forEach(r=>r.style.background='');
+      const row = document.querySelector(`#memberList .member-row[data-id="${member.id}"]`);
+      if (row) row.style.background = 'var(--blue-soft)';
+      await renderTradeBuilder();
+      document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
+    };
+  });
+}
 async function renderTradeBoardHistory(member){
   const histEl = document.getElementById('tradeBoardHistory');
   if (!histEl) return;
