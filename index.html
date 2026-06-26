@@ -308,6 +308,7 @@ let profile = null;
 let myCollection = new Map();
 let allMembers = [];
 let myReservations = new Map(); // code -> pseudo of who it's promised to
+let whoHasSpare = new Map(); // code -> [pseudo, ...] of other members with a duplicate
 
 async function loadMyReservations(){
   const { data } = await sb.from('trade_proposals').select('*')
@@ -318,6 +319,17 @@ async function loadMyReservations(){
     for (const raw of t.offer_codes){
       const code = raw.split(':')[0];
       myReservations.set(code, pseudo);
+    }
+  }
+  // Also build whoHasSpare from allMembers
+  whoHasSpare = new Map();
+  for (const m of allMembers){
+    if (m.id === profile.id) continue;
+    for (const [code, v] of m.collection.entries()){
+      if (v.status === 'duplicate'){
+        if (!whoHasSpare.has(code)) whoHasSpare.set(code, []);
+        whoHasSpare.get(code).push(m.pseudo);
+      }
     }
   }
 }
@@ -639,7 +651,8 @@ function renderImport(main){
 /* ============================================================ MY ALBUM ============================================================ */
 let statusFilter = 'all';
 let openParallelPicker = null;
-function renderAlbum(main){
+async function renderAlbum(main){
+  if (!allMembers.length) await loadAllMembers();
   let have=0,missing=0,dup=0,dupCopies=0;
   for (const v of myCollection.values()){
     if (v.status==='have') have++; else if (v.status==='missing') missing++; else { dup++; dupCopies+=v.count; }
@@ -648,9 +661,8 @@ function renderAlbum(main){
     <div class="help-box">
       <h3>📖 How My Album works</h3>
       <ul>
-        <li><strong>All</strong> — see every sticker: owned (white), missing (dashed), duplicate (yellow)</li>
-        <li><strong>My duplicates</strong> — click any card to tag its parallel color (blue, red, purple, green, black)</li>
-        <li><strong>Missing only</strong> — see what you still need</li>
+        <li><strong>All / Missing only</strong> — white = owned, faded = missing, yellow = duplicate. A <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);border:1.5px solid #888;vertical-align:middle;"></span> red dot on a missing card means someone in the group has a spare — hover to see who</li>
+        <li><strong>My duplicates</strong> — click any card to tag its parallel color (blue, red, purple, green, black). Use <strong>🔵 All blue</strong> to tag all at once</li>
         <li>Your album only changes via <strong>Import</strong> — nothing here edits your collection</li>
       </ul>
     </div>
@@ -728,6 +740,7 @@ function renderNumberRows(numbers){
       <span><span style="display:inline-block;width:28px;height:18px;background:#1C75BC;border:1.5px solid #1A1A1A;border-radius:4px;vertical-align:middle;"></span> Your spare (parallel color)</span>
       <span><span style="display:inline-block;width:28px;height:18px;background:white;border:1.5px solid #1A1A1A;border-radius:4px;opacity:0.35;vertical-align:middle;"></span> Missing</span>
       <span><span style="color:orange;font-weight:900;font-size:15px;">⚠</span> Already in a proposal</span>
+      <span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--red);border:1.5px solid #888;vertical-align:middle;"></span> Someone has a spare (hover to see who)</span>
     </div>
     ${numbers.map(n=>{
       const cards = MASTER.filter(s=>s.number===n && s.team!=='FWC' && s.team!=='CC');
@@ -746,11 +759,12 @@ function renderNumberRows(numbers){
             const promised = myReservations.get(s.code);
             const tooltipParts = [];
             if (v.status==='duplicate') tooltipParts.push(`You have a spare${hasPar?' ('+v.parallel+' parallel)':''}`);
-            if (holders.length) tooltipParts.push(`Others with spare: ${holders.join(', ')}`);
+            if (holders.length) tooltipParts.push(`Has spare: ${holders.join(', ')}`);
             if (promised) tooltipParts.push(`⚠ You promised this to: ${promised}`);
             const tooltip = tooltipParts.length ? tooltipParts.join(' | ') : s.code;
             const warn = promised ? `<span style="color:orange;font-weight:900;font-size:9px;">⚠</span>` : '';
-            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${cardStyle}cursor:default;" title="${tooltip}">${warn}${s.code}</span>`;
+            const redDot = v.status==='missing' && holders.length ? `<span style="position:absolute;top:-4px;right:-4px;width:9px;height:9px;border-radius:50%;background:var(--red);border:1.5px solid #fff;"></span>` : '';
+            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${cardStyle}cursor:default;position:relative;" title="${tooltip}">${warn}${redDot}${s.code}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -793,7 +807,12 @@ function renderGroups(filter=''){
               const pickerHtml = openParallelPicker===s.code ? editablePicker(s.code, v.parallel||'normal') : '';
               return `<div class="${openParallelPicker===s.code?'duplicate-card-open':''}">${cardHtml}${pickerHtml}</div>`;
             }
-            return `<div class="cell s-${v.status}" data-code="${s.code}" style="cursor:default;">${v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:''}${v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:''}${s.code}</div>`;
+            const spare = whoHasSpare.get(s.code);
+            const spareDot = v.status==='missing' && spare ? `<span style="position:absolute;bottom:-4px;right:-4px;width:10px;height:10px;border-radius:50%;background:var(--red);border:1.5px solid #fff;cursor:help;" title="Has spare: ${spare.join(', ')}"></span>` : '';
+            return `<div class="cell s-${v.status}" data-code="${s.code}" style="cursor:default;" title="${spare&&v.status==='missing'?'Has spare: '+spare.join(', '):''}">` +
+              (v.status==='duplicate'&&v.count>1?`<span class="badge">${v.count}x</span>`:'') +
+              (v.parallel&&v.parallel!=='normal'?`<span class="parallel-dot tag-${v.parallel} active" style="position:absolute;bottom:-4px;left:-4px;width:10px;height:10px;cursor:default;"></span>`:'') +
+              spareDot + s.code + `</div>`;
           }).join('')}
         </div>
       </div>`;
