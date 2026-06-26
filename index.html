@@ -307,6 +307,24 @@ function buildCollectionMap(missing, duplicates){
 let profile = null;
 let myCollection = new Map();
 let allMembers = [];
+let myReservations = new Map(); // code -> pseudo of who it's promised to
+
+async function loadMyReservations(){
+  const { data } = await sb.from('trade_proposals').select('*')
+    .eq('from_user', profile.id).in('status',['pending','accepted']);
+  myReservations = new Map();
+  for (const t of (data||[])){
+    const pseudo = (allMembers.find(m=>m.id===t.to_user)||{}).pseudo || '?';
+    for (const raw of t.offer_codes){
+      const code = raw.split(':')[0];
+      myReservations.set(code, pseudo);
+    }
+  }
+}
+function reservationWarning(code){
+  const who = myReservations.get(code);
+  return who ? `<span style="color:orange;font-weight:900;cursor:help;" title="Already promised to ${who}">⚠</span>` : '';
+}
 let currentTab = 'import';
 let openTeams = new Set();
 const root = document.getElementById('app');
@@ -359,6 +377,7 @@ async function loadAllMembers(){
     if (u) u.collection.set(r.sticker_code, {status:r.status, count:r.duplicate_count, parallel:r.parallel||'normal'});
   });
   allMembers = [...byUser.values()];
+  await loadMyReservations();
 }
 async function saveCollection(missing, duplicates, mode='both'){
   let map;
@@ -484,6 +503,7 @@ function renderShell(){
         <button data-tab="import">Import</button>
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
+        <button data-tab="holo" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>✨ Holo</button>
         <button data-tab="trades" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Trades <span id="tradesBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:800;padding:1px 6px;margin-left:4px;vertical-align:1px;"></span></button>
         <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
         <button data-tab="members">Members</button>
@@ -514,6 +534,7 @@ function renderTab(){
   if (currentTab==='import') return renderImport(main);
   if (currentTab==='album') return renderAlbum(main);
   if (currentTab==='trade') return renderTradeBoard(main);
+  if (currentTab==='holo') return renderHoloTab(main);
   if (currentTab==='trades') return renderMyTrades(main);
   if (currentTab==='wanted') return renderWanted(main);
   if (currentTab==='search') return renderSearch(main);
@@ -706,7 +727,8 @@ function renderNumberRows(numbers){
             const style = bg ? `background:${bg};` : v.status==='missing'?'opacity:0.35;':'';
             const holders = whoHasDupe.get(s.code)||[];
             const tooltip = holders.length ? `Has spare: ${holders.join(', ')}` : (v.status==='duplicate'?'You have a spare':'');
-            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${style}cursor:default;" title="${tooltip||s.code}">${s.code}</span>`;
+            const warn = myReservations.has(s.code) ? `<span style="color:orange;font-weight:900;" title="Promised to ${myReservations.get(s.code)}">⚠</span>` : '';
+            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${style}cursor:default;" title="${tooltip||s.code}">${warn}${s.code}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -857,11 +879,6 @@ async function renderTradeBoard(main){
     </div>
     <div class="panel" id="tradeBoardHistory" style="margin-top:0;">
       <div class="loading" style="padding:20px 0;">Loading proposals…</div>
-    </div>
-    <div class="panel" id="holoPanel" style="margin-top:0;">
-      <h2>✨ Holo Trades</h2>
-      <p class="lead">FWC cards + all #1s — premium cards people typically trade among themselves. Mutual matches highlighted.</p>
-      <div id="holoList"><div class="loading">Loading…</div></div>
     </div>`;
 
   document.getElementById('memberList').querySelectorAll('.member-row').forEach(row=>{
@@ -877,25 +894,34 @@ async function renderTradeBoard(main){
     };
   });
   await renderTradeBoardHistory(null);
-  renderHoloTrades(matches);
   const refreshBtn = document.getElementById('refreshTB');
   if (refreshBtn) refreshBtn.onclick = ()=>renderTradeBoard(document.getElementById('main'));
 }
 let sentDealsThisSession = [];
-function renderHoloTrades(matches){
-  const el = document.getElementById('holoList');
-  if (!el) return;
-  // Define holo codes: FWC + all team #1s
+async function renderHoloTab(main){
+  main.innerHTML = `
+    <div class="help-box">
+      <h3>✨ How Holo Trades works</h3>
+      <ul>
+        <li>Shows only <strong>FWC cards</strong> (the special FIFA World Cup cards) and <strong>all #1s</strong> across every team — the premium holo cards</li>
+        <li>Holo cards are typically traded <strong>holo for holo</strong> — one special card for another special card</li>
+        <li><strong>✨ Mutual swap</strong> highlighted in yellow — both of you have something the other needs</li>
+        <li>Click <strong>"Open in Trade Board →"</strong> to go directly to the builder with that person pre-selected</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h2>✨ Holo Trades</h2>
+      <p class="lead">FWC cards + all #1s — your holo matches across the group.</p>
+      <div id="holoList"><div class="loading">Loading…</div></div>
+    </div>`;
+  await loadAllMembers();
+  const others = allMembers.filter(m=>m.id!==profile.id && m.collection.size>0);
   const holoCodes = new Set(MASTER.filter(s=>s.team==='FWC' || s.number===1).map(s=>s.code));
-
-  const rows = matches.map(x=>{
-    const m = x.member;
-    // My holo dupes they need
+  const rows = others.map(m=>{
     const iGive = [...holoCodes].filter(code=>
       (myCollection.get(code)||{}).status==='duplicate' &&
       (m.collection.get(code)||{}).status==='missing'
     );
-    // Their holo dupes I need
     const iGet = [...holoCodes].filter(code=>
       (m.collection.get(code)||{}).status==='duplicate' &&
       (myCollection.get(code)||{}).status==='missing'
@@ -903,11 +929,11 @@ function renderHoloTrades(matches){
     return { member:m, iGive, iGet };
   }).filter(r=>r.iGive.length>0 || r.iGet.length>0);
 
+  const el = document.getElementById('holoList');
   if (!rows.length){
-    el.innerHTML = '<p class="empty-note">No holo matches right now — import more cards to see potential swaps.</p>';
+    el.innerHTML = '<p class="empty-note">No holo matches right now — more cards need to be imported to see potential swaps.</p>';
     return;
   }
-
   el.innerHTML = rows.map(r=>{
     const mutual = r.iGive.length>0 && r.iGet.length>0;
     return `
@@ -921,7 +947,7 @@ function renderHoloTrades(matches){
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">You give</div>
           <div class="sticker-chips">${r.iGive.length?r.iGive.map(code=>{
             const v = myCollection.get(code)||{};
-            return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}">${code}</span>`;
+            return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}">${reservationWarning(code)}${code}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>
         <div>
@@ -937,20 +963,22 @@ function renderHoloTrades(matches){
   }).join('');
 
   el.querySelectorAll('[data-holo-member]').forEach(btn=>{
-    btn.onclick = async ()=>{
+    btn.onclick = ()=>{
       const member = allMembers.find(m=>m.id===btn.dataset.holoMember);
       if (!member) return;
       selectedTradeMember = member;
       tradeSelection = { give: new Set(), get: new Set() };
       sentDealsThisSession = [];
-      document.querySelectorAll('#memberList .member-row').forEach(r=>r.style.background='');
-      const row = document.querySelector(`#memberList .member-row[data-id="${member.id}"]`);
-      if (row) row.style.background = 'var(--blue-soft)';
-      await renderTradeBuilder();
-      document.getElementById('builderPanel').scrollIntoView({behavior:'smooth', block:'start'});
+      currentTab = 'trade';
+      renderShell();
+      setTimeout(async ()=>{
+        const builderPanel = document.getElementById('builderPanel');
+        if (builderPanel){ await renderTradeBuilder(); builderPanel.scrollIntoView({behavior:'smooth', block:'start'}); }
+      }, 100);
     };
   });
 }
+
 async function renderTradeBoardHistory(member){
   const histEl = document.getElementById('tradeBoardHistory');
   if (!histEl) return;
@@ -1015,41 +1043,6 @@ async function renderTradeBuilder(){
   const prevScroll = prevTG ? prevTG.scrollTop : 0;
   panel.scrollIntoView({behavior:'smooth', block:'nearest'});
 
-  // Fetch active proposals (pending + accepted) for both sides to detect conflicts
-  const { data: activeProposals } = await sb.from('trade_proposals')
-    .select('*')
-    .in('status', ['pending','accepted'])
-    .or(`from_user.eq.${profile.id},from_user.eq.${member.id}`);
-
-  // Cards you've already promised in OTHER active proposals (not this member)
-  const myReserved = new Map(); // code -> pseudo of who you promised it to
-  // Cards they've already promised to OTHER people (not you)
-  const theirReserved = new Map(); // code -> pseudo of who they promised it to
-
-  for (const t of (activeProposals||[])){
-    const isFromMe = t.from_user === profile.id;
-    const isFromThem = t.from_user === member.id;
-    const isToCurrentMember = t.to_user === member.id;
-    const isToMe = t.to_user === profile.id;
-
-    if (isFromMe && !isToCurrentMember){
-      // My offer codes promised to someone else
-      const otherMember = allMembers.find(m=>m.id===t.to_user);
-      for (const raw of t.offer_codes){
-        const {code} = parseTradeCode(raw);
-        myReserved.set(code, otherMember?.pseudo||'someone');
-      }
-    }
-    if (isFromThem && !isToMe){
-      // Their offer codes promised to someone else
-      const otherMember = allMembers.find(m=>m.id===t.to_user);
-      for (const raw of t.offer_codes){
-        const {code} = parseTradeCode(raw);
-        theirReserved.set(code, otherMember?.pseudo||'someone');
-      }
-    }
-  }
-
   const groupsWithDups = GROUPS.filter(g=>{
     const teamCodes = MASTER.filter(s=>s.team===g).map(s=>s.code);
     // Only show teams where there's at least one real match in either direction
@@ -1089,15 +1082,13 @@ async function renderTradeBuilder(){
             const v = myCollection.get(s.code);
             const sel = tradeSelection.give.has(s.code);
             const theyNeed = (member.collection.get(s.code)||{}).status==='missing';
-            const reserved = myReserved.get(s.code);
-            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${theyNeed?`<span class="indicator-symbol" style="color:var(--red);font-weight:900;">↓</span> `:''}${reserved?`<span title="Already promised to ${reserved}" class="indicator-symbol" style="color:orange;font-weight:900;">⚠</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            return `<span class="sticker give trade-chip" data-side="give" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${theyNeed?`<span class="indicator-symbol" style="color:var(--red);font-weight:900;">↓</span> `:''}${reservationWarning(s.code)}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
           <div class="sticker-chips">${theirsDups.length?theirsDups.map(s=>{
             const v = member.collection.get(s.code);
             const sel = tradeSelection.get.has(s.code);
             const needed = (myCollection.get(s.code)||{}).status==='missing';
-            const reserved = theirReserved.get(s.code);
-            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${reserved?`<span title="Already promised to ${reserved}" class="indicator-symbol" style="color:orange;font-weight:900;">⚠</span> `:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>`;
       }).join('')}
@@ -1484,7 +1475,7 @@ function renderYourMostWantedList(rows, memberId){
     return `
     <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-        <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${r.code}${r.count>1?` (${r.count}x)`:''}</span>
+        <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${reservationWarning(r.code)}${r.code}${r.count>1?` (${r.count}x)`:''}</span>
         ${memberId?'':`<span class="count">${r.neededBy.length} need it</span>`}
       </div>
       <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
