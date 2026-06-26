@@ -323,7 +323,14 @@ async function loadMyReservations(){
 }
 function reservationWarning(code){
   const who = myReservations.get(code);
-  return who ? `<span style="color:orange;font-weight:900;cursor:help;" title="Already promised to ${who}">⚠</span>` : '';
+  return who ? `<span style="color:orange;font-weight:900;font-size:9px;">⚠</span>` : '';
+}
+function reservationTitle(code, extraInfo=''){
+  const who = myReservations.get(code);
+  const parts = [];
+  if (extraInfo) parts.push(extraInfo);
+  if (who) parts.push(`⚠ Promised to: ${who}`);
+  return parts.join(' | ') || code;
 }
 let currentTab = 'import';
 let openTeams = new Set();
@@ -503,7 +510,7 @@ function renderShell(){
         <button data-tab="import">Import</button>
         <button data-tab="album" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Album</button>
         <button data-tab="trade" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Trade Board</button>
-        <button data-tab="holo" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>✨ Holo</button>
+        <button data-tab="holo" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>✨ Holo Trades</button>
         <button data-tab="trades" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>My Trades <span id="tradesBadge" style="display:none;background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:800;padding:1px 6px;margin-left:4px;vertical-align:1px;"></span></button>
         <button data-tab="wanted" ${!hasData?'disabled style="opacity:.4;cursor:default"':''}>Most Wanted</button>
         <button data-tab="members">Members</button>
@@ -714,7 +721,14 @@ function renderNumberRows(numbers){
 
   panel.innerHTML = `
     <h2 style="font-size:16px;margin-bottom:4px;">Quick reference — by number</h2>
-    <p class="lead" style="margin-bottom:14px;">All teams' card #1 and #13 at a glance. Hover to see who has a spare.</p>
+    <p class="lead" style="margin-bottom:10px;">All teams' card #1 and #13 at a glance. Hover any card to see the full situation.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;align-items:center;">
+      <span><span style="display:inline-block;width:28px;height:18px;background:white;border:1.5px solid #1A1A1A;border-radius:4px;vertical-align:middle;"></span> Owned</span>
+      <span><span style="display:inline-block;width:28px;height:18px;background:var(--yellow);border:1.5px solid #1A1A1A;border-radius:4px;vertical-align:middle;"></span> Your spare (normal)</span>
+      <span><span style="display:inline-block;width:28px;height:18px;background:#1C75BC;border:1.5px solid #1A1A1A;border-radius:4px;vertical-align:middle;"></span> Your spare (parallel color)</span>
+      <span><span style="display:inline-block;width:28px;height:18px;background:white;border:1.5px solid #1A1A1A;border-radius:4px;opacity:0.35;vertical-align:middle;"></span> Missing</span>
+      <span><span style="color:orange;font-weight:900;font-size:15px;">⚠</span> Already in a proposal</span>
+    </div>
     ${numbers.map(n=>{
       const cards = MASTER.filter(s=>s.number===n && s.team!=='FWC' && s.team!=='CC');
       return `
@@ -723,12 +737,20 @@ function renderNumberRows(numbers){
         <div style="display:flex;flex-wrap:wrap;gap:6px;">
           ${cards.map(s=>{
             const v = myCollection.get(s.code)||{status:'have',parallel:'normal'};
-            const bg = v.status==='duplicate' ? (v.parallel&&v.parallel!=='normal'?PARALLEL_CHIP_STYLE[v.parallel]?.bg||'var(--yellow)':'var(--yellow)') : '';
-            const style = bg ? `background:${bg};` : v.status==='missing'?'opacity:0.35;':'';
+            const hasPar = v.status==='duplicate' && v.parallel && v.parallel!=='normal';
+            const bg = v.status==='duplicate'
+              ? (hasPar ? PARALLEL_CHIP_STYLE[v.parallel]?.bg||'var(--yellow)' : 'var(--yellow)')
+              : '';
+            const cardStyle = bg ? `background:${bg};` : v.status==='missing'?'opacity:0.35;':'';
             const holders = whoHasDupe.get(s.code)||[];
-            const tooltip = holders.length ? `Has spare: ${holders.join(', ')}` : (v.status==='duplicate'?'You have a spare':'');
-            const warn = myReservations.has(s.code) ? `<span style="color:orange;font-weight:900;" title="Promised to ${myReservations.get(s.code)}">⚠</span>` : '';
-            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${style}cursor:default;" title="${tooltip||s.code}">${warn}${s.code}</span>`;
+            const promised = myReservations.get(s.code);
+            const tooltipParts = [];
+            if (v.status==='duplicate') tooltipParts.push(`You have a spare${hasPar?' ('+v.parallel+' parallel)':''}`);
+            if (holders.length) tooltipParts.push(`Others with spare: ${holders.join(', ')}`);
+            if (promised) tooltipParts.push(`⚠ You promised this to: ${promised}`);
+            const tooltip = tooltipParts.length ? tooltipParts.join(' | ') : s.code;
+            const warn = promised ? `<span style="color:orange;font-weight:900;font-size:9px;">⚠</span>` : '';
+            return `<span class="sticker" style="border:1.5px solid var(--ink);font-size:10px;${cardStyle}cursor:default;" title="${tooltip}">${warn}${s.code}</span>`;
           }).join('')}
         </div>
       </div>`;
@@ -947,7 +969,7 @@ async function renderHoloTab(main){
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">You give</div>
           <div class="sticker-chips">${r.iGive.length?r.iGive.map(code=>{
             const v = myCollection.get(code)||{};
-            return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}">${reservationWarning(code)}${code}</span>`;
+            return `<span class="sticker give" style="${parallelChipStyle(v.parallel)}" title="${reservationTitle(code)}">${reservationWarning(code)}${code}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>
         <div>
@@ -1475,7 +1497,7 @@ function renderYourMostWantedList(rows, memberId){
     return `
     <div style="border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px;">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-        <span class="sticker give" style="${parallelChipStyle(r.parallel)}">${reservationWarning(r.code)}${r.code}${r.count>1?` (${r.count}x)`:''}</span>
+        <span class="sticker give" style="${parallelChipStyle(r.parallel)}" title="${reservationTitle(r.code)}">${reservationWarning(r.code)}${r.code}${r.count>1?` (${r.count}x)`:''}</span>
         ${memberId?'':`<span class="count">${r.neededBy.length} need it</span>`}
       </div>
       <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
