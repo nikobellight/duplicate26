@@ -721,7 +721,7 @@ function renderGroups(filter=''){
       <div class="team-group" data-group="${g}">
         <div class="team-head" data-toggle="${g}">
           <div class="left">${teamLabel(g)}<span>${name}</span></div>
-          <div style="display:flex;align-items:center;gap:10px;">${pct===100?`<span class="badge-pill" style="background:var(--green);color:#fff;">✓ COMPLETE</span>`:`<div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>`}<div class="pct">${owned}/${total}</div></div>
+          <div style="display:flex;align-items:center;gap:10px;">${pct===100?`<span class="badge-pill" style="background:var(--green);color:#fff;">✓ COMPLETE</span>`:`<div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>`}<div class="pct">${owned}/${total} <span style="color:var(--mist);font-size:11px;">${pct}%</span></div></div>
         </div>
         <div class="team-body ${isOpen?'open':''}">
           ${visibleStickers.map(s=>{
