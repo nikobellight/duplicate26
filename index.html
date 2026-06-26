@@ -102,7 +102,7 @@
   .badge-pill.special{background:var(--blue-soft);color:var(--blue);}
   .badge-pill.promo{background:var(--red-soft);color:var(--red);}
   .team-head .bar-wrap{width:80px;height:6px;background:var(--line);border-radius:3px;overflow:hidden;}
-  .team-head .bar{height:100%;background:var(--blue);}
+  .team-head .bar{height:100%;}
   .team-head .pct{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--mist);min-width:38px;text-align:right;}
   .team-body{display:none;padding:14px 16px;background:var(--paper);}
   .team-body.open{display:grid;grid-template-columns:repeat(auto-fill,minmax(54px,1fr));gap:8px;}
@@ -721,7 +721,7 @@ function renderGroups(filter=''){
       <div class="team-group" data-group="${g}">
         <div class="team-head" data-toggle="${g}">
           <div class="left">${teamLabel(g)}<span>${name}</span></div>
-          <div style="display:flex;align-items:center;gap:10px;">${pct===100?`<span class="badge-pill" style="background:var(--green);color:#fff;">✓ COMPLETE</span>`:`<div class="bar-wrap"><div class="bar" style="width:${pct}%"></div></div>`}<div class="pct">${owned}/${total} <span style="color:var(--mist);font-size:11px;">${pct}%</span></div></div>
+          <div style="display:flex;align-items:center;gap:10px;">${pct===100?`<span class="badge-pill" style="background:var(--green);color:#fff;">✓ COMPLETE</span>`:`<div class="bar-wrap"><div class="bar" style="width:${pct}%;background:hsl(${Math.round(pct*1.2)},75%,42%);"></div></div>`}<div class="pct">${owned}/${total} <span style="color:var(--mist);font-size:11px;">${pct}%</span></div></div>
         </div>
         <div class="team-body ${isOpen?'open':''}">
           ${visibleStickers.map(s=>{
