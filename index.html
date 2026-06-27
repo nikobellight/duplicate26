@@ -318,15 +318,20 @@ async function loadMyReservations(){
   myReservations = new Map();
   incomingOffers = new Map();
   for (const t of (data||[])){
-    // Cards I promised to others
+    // Cards I promised to others (what I give)
     if (t.from_user === profile.id){
       const pseudo = (allMembers.find(m=>m.id===t.to_user)||{}).pseudo || '?';
       for (const raw of t.offer_codes){
         const code = raw.split(':')[0];
         myReservations.set(code, pseudo);
       }
+      // Cards I'll receive (what I requested in my own proposals)
+      for (const raw of t.request_codes){
+        const code = raw.split(':')[0];
+        incomingOffers.set(code, pseudo);
+      }
     }
-    // Cards others are offering me
+    // Cards others are offering me in their proposals
     if (t.to_user === profile.id){
       const pseudo = (allMembers.find(m=>m.id===t.from_user)||{}).pseudo || '?';
       for (const raw of t.offer_codes){
@@ -911,7 +916,7 @@ async function renderTradeBoard(main){
       <h3>🔄 How the Trade Board works</h3>
       <ol>
         <li>Click a name on the left — the builder opens on the right</li>
-        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already promised &nbsp;·&nbsp; 📬 someone already offering you this</li>
+        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already promised to someone &nbsp;·&nbsp; 📬 someone is already offering you this</li>
         <li>Click cards to select, then <strong>Send trade proposal</strong></li>
       </ol>
     </div>
