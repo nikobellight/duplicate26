@@ -309,19 +309,33 @@ let myCollection = new Map();
 let allMembers = [];
 let myReservations = new Map(); // code -> pseudo of who it's promised to
 let whoHasSpare = new Map(); // code -> [pseudo, ...] of other members with a duplicate
+let incomingOffers = new Map(); // code -> pseudo of who is already offering it to me
 
 async function loadMyReservations(){
   const { data } = await sb.from('trade_proposals').select('*')
-    .eq('from_user', profile.id).in('status',['pending','accepted']);
+    .or(`from_user.eq.${profile.id},to_user.eq.${profile.id}`)
+    .in('status',['pending','accepted']);
   myReservations = new Map();
+  incomingOffers = new Map();
   for (const t of (data||[])){
-    const pseudo = (allMembers.find(m=>m.id===t.to_user)||{}).pseudo || '?';
-    for (const raw of t.offer_codes){
-      const code = raw.split(':')[0];
-      myReservations.set(code, pseudo);
+    // Cards I promised to others
+    if (t.from_user === profile.id){
+      const pseudo = (allMembers.find(m=>m.id===t.to_user)||{}).pseudo || '?';
+      for (const raw of t.offer_codes){
+        const code = raw.split(':')[0];
+        myReservations.set(code, pseudo);
+      }
+    }
+    // Cards others are offering me
+    if (t.to_user === profile.id){
+      const pseudo = (allMembers.find(m=>m.id===t.from_user)||{}).pseudo || '?';
+      for (const raw of t.offer_codes){
+        const code = raw.split(':')[0];
+        incomingOffers.set(code, pseudo);
+      }
     }
   }
-  // Also build whoHasSpare from allMembers
+  // Build whoHasSpare from allMembers
   whoHasSpare = new Map();
   for (const m of allMembers){
     if (m.id === profile.id) continue;
@@ -337,11 +351,17 @@ function reservationWarning(code){
   const who = myReservations.get(code);
   return who ? `<span style="color:orange;font-weight:900;font-size:9px;">⚠</span>` : '';
 }
+function incomingOfferWarning(code){
+  const who = incomingOffers.get(code);
+  return who ? `<span style="color:var(--blue);font-weight:900;font-size:11px;" title="Already offered to you by ${who}">📬</span>` : '';
+}
 function reservationTitle(code, extraInfo=''){
   const who = myReservations.get(code);
+  const incoming = incomingOffers.get(code);
   const parts = [];
   if (extraInfo) parts.push(extraInfo);
   if (who) parts.push(`⚠ Promised to: ${who}`);
+  if (incoming) parts.push(`📬 Already offered to you by: ${incoming}`);
   return parts.join(' | ') || code;
 }
 let currentTab = 'import';
@@ -891,7 +911,7 @@ async function renderTradeBoard(main){
       <h3>🔄 How the Trade Board works</h3>
       <ol>
         <li>Click a name on the left — the builder opens on the right</li>
-        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already in another deal</li>
+        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already promised &nbsp;·&nbsp; 📬 someone already offering you this</li>
         <li>Click cards to select, then <strong>Send trade proposal</strong></li>
       </ol>
     </div>
@@ -995,7 +1015,7 @@ async function renderHoloTab(main){
           <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">You get</div>
           <div class="sticker-chips">${r.iGet.length?r.iGet.map(code=>{
             const v = r.member.collection.get(code)||{};
-            return `<span class="sticker get" style="${parallelChipStyle(v.parallel)}">${code}</span>`;
+            return `<span class="sticker get" style="${parallelChipStyle(v.parallel)}" title="${reservationTitle(code)}">${incomingOfferWarning(code)}${code}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>
       </div>
@@ -1100,7 +1120,7 @@ async function renderTradeBuilder(){
       <h2 style="font-size:18px;">Trade with ${member.pseudo}</h2>
     </div>
     <div class="trade-header-cols"><div></div><div>You give</div><div>${member.pseudo} gives</div></div>
-    <p class="example" style="margin:-2px 0 8px;"><span class="indicator-symbol" style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it &nbsp;·&nbsp; <span class="indicator-symbol" style="color:orange;font-weight:900;">⚠</span> = already promised in another deal</p>
+    <p class="example" style="margin:-2px 0 8px;"><span class="indicator-symbol" style="color:var(--red);font-weight:900;">↓</span> = they need it &nbsp;·&nbsp; ${star}= you need it &nbsp;·&nbsp; <span class="indicator-symbol" style="color:orange;font-weight:900;">⚠</span> = already promised &nbsp;·&nbsp; 📬 = someone already offering you this</p>
     ${sentDealsThisSession.length?`
     <div style="background:var(--paper-soft);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:14px;">
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--mist);margin-bottom:6px;">Deals sent this session (${sentDealsThisSession.length}) — each is separate</div>
@@ -1129,7 +1149,7 @@ async function renderTradeBuilder(){
             const v = member.collection.get(s.code);
             const sel = tradeSelection.get.has(s.code);
             const needed = (myCollection.get(s.code)||{}).status==='missing';
-            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
+            return `<span class="sticker get trade-chip" data-side="get" data-code="${s.code}" style="cursor:pointer;${parallelChipStyle(v.parallel)}${sel?'outline:2.5px solid var(--ink);':''}">${needed?star:''}${incomingOfferWarning(s.code)}${s.code}${v.count>1?` (${v.count}x)`:''}</span>`;
           }).join(''):'<span class="empty-note">—</span>'}</div>
         </div>`;
       }).join('')}
