@@ -1298,7 +1298,6 @@ async function handleComplete(tradeId){
   }catch(e){ alert('Trade failed: '+e.message); }
 }
 async function handleRespond(tradeId, newStatus){
-  // If cancelling an approved trade, restore both sides' reserved cards
   if (newStatus==='cancelled'){
     const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
     if (trade && trade.status==='accepted'){
@@ -1306,7 +1305,8 @@ async function handleRespond(tradeId, newStatus){
       await unserveCodes(trade.to_user, trade.request_codes);
     }
   }
-  await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
+  const { error } = await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
+  if (error) throw new Error(error.message);
   await loadMyCollection();
   renderShell();
 }
