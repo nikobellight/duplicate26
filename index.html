@@ -318,20 +318,15 @@ async function loadMyReservations(){
   myReservations = new Map();
   incomingOffers = new Map();
   for (const t of (data||[])){
-    // Cards I promised to others (what I give)
+    // Cards I promised to others
     if (t.from_user === profile.id){
       const pseudo = (allMembers.find(m=>m.id===t.to_user)||{}).pseudo || '?';
       for (const raw of t.offer_codes){
         const code = raw.split(':')[0];
         myReservations.set(code, pseudo);
       }
-      // Cards I'll receive (what I requested in my own proposals)
-      for (const raw of t.request_codes){
-        const code = raw.split(':')[0];
-        incomingOffers.set(code, pseudo);
-      }
     }
-    // Cards others are offering me in their proposals
+    // Cards others are offering me
     if (t.to_user === profile.id){
       const pseudo = (allMembers.find(m=>m.id===t.from_user)||{}).pseudo || '?';
       for (const raw of t.offer_codes){
@@ -916,7 +911,7 @@ async function renderTradeBoard(main){
       <h3>🔄 How the Trade Board works</h3>
       <ol>
         <li>Click a name on the left — the builder opens on the right</li>
-        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already promised to someone &nbsp;·&nbsp; 📬 someone is already offering you this</li>
+        <li><span style="color:var(--red);font-weight:900;font-size:15px;">↓</span> they need it &nbsp;·&nbsp; <span style="color:var(--yellow-deep);font-weight:900;font-size:15px;">★</span> you need it &nbsp;·&nbsp; <span style="color:orange;font-weight:900;font-size:15px;">⚠</span> already in another deal</li>
         <li>Click cards to select, then <strong>Send trade proposal</strong></li>
       </ol>
     </div>
@@ -1298,6 +1293,7 @@ async function handleComplete(tradeId){
   }catch(e){ alert('Trade failed: '+e.message); }
 }
 async function handleRespond(tradeId, newStatus){
+  // If cancelling an approved trade, restore both sides' reserved cards
   if (newStatus==='cancelled'){
     const { data: trade } = await sb.from('trade_proposals').select('*').eq('id', tradeId).maybeSingle();
     if (trade && trade.status==='accepted'){
@@ -1305,8 +1301,7 @@ async function handleRespond(tradeId, newStatus){
       await unserveCodes(trade.to_user, trade.request_codes);
     }
   }
-  const { error } = await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
-  if (error) throw new Error(error.message);
+  await sb.from('trade_proposals').update({ status:newStatus, updated_at:new Date().toISOString() }).eq('id', tradeId);
   await loadMyCollection();
   renderShell();
 }
@@ -1318,88 +1313,77 @@ async function renderMyTrades(main){
       <h3>📬 How My Trades works</h3>
       <ul>
         <li><strong>Waiting on you</strong> — someone sent you a proposal. Approve or Reject.</li>
-        <li><strong>Sent by you</strong> — proposals you sent, waiting for the other person. You can Cancel.</li>
-        <li><strong>Approved — not applied yet</strong> — both agreed. Once you've physically swapped the stickers, click <strong>Deal done ✓</strong> to update both albums automatically.</li>
-        <li><strong>History</strong> — past deals. You can delete finished entries to keep it clean.</li>
+        <li><strong>Sent by you</strong> — waiting for the other person to respond. You can Cancel.</li>
+        <li><strong>Agreed — swap pending</strong> — both sides agreed. Once you physically swap the stickers, click <strong>Deal done ✓</strong> to update both albums. Cards are reserved and won't appear as available until cancelled or completed.</li>
+        <li><strong>History</strong> — all finished trades. Green = completed ✓, grey = cancelled/rejected.</li>
       </ul>
     </div>
-    <div class="panel"><h2>My Trades</h2><div class="loading">Loading…</div></div>`;
+    <div class="panel" id="myTradesPanel"><div class="loading">Loading…</div></div>`;
   await loadAllMembers();
   await loadMyTrades();
   const pseudoOf = id => (allMembers.find(m=>m.id===id)||{}).pseudo || 'someone';
+  const fmt = ts => new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric'});
   const waitingOnYou = myTrades.filter(t=>t.status==='pending' && t.to_user===profile.id);
   const sentByYou = myTrades.filter(t=>t.status==='pending' && t.from_user===profile.id);
   const accepted = myTrades.filter(t=>t.status==='accepted');
-  const history = myTrades.filter(t=>!['pending','accepted'].includes(t.status)).slice(0,20);
+  const history = myTrades.filter(t=>!['pending','accepted'].includes(t.status)).slice(0,30);
 
-  document.getElementById('main').innerHTML = `
-    <div class="panel">
-      <h2>My Trades</h2>
-      <p class="lead">Accept just means you agree — nothing changes in either album until someone hits "Deal done" below, once the stickers have actually changed hands.</p>
-      <h3 style="font-size:15px;margin:18px 0 8px;">Waiting on you (${waitingOnYou.length})</h3>
-      ${waitingOnYou.length===0?'<p class="empty-note">Nothing pending.</p>':waitingOnYou.map(t=>`
-        <div class="member-row" style="cursor:default;align-items:flex-start;">
-          <div>
-            <div class="name">${pseudoOf(t.from_user)} offers you</div>
-            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>tradeChip(c,'get')).join('')}</div>
-            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">in exchange for your:</div>
-            <div class="sticker-chips">${t.request_codes.map(c=>tradeChip(c,'give')).join('')}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            <button class="btn" data-approve="${t.id}">Approve</button>
-            <button class="btn ghost" data-reject="${t.id}">Reject</button>
-          </div>
-        </div>`).join('')}
-      <h3 style="font-size:15px;margin:18px 0 8px;">Sent by you (${sentByYou.length})</h3>
-      ${sentByYou.length===0?'<p class="empty-note">Nothing sent.</p>':sentByYou.map(t=>`
-        <div class="member-row" style="cursor:default;align-items:flex-start;">
-          <div>
-            <div class="name">To ${pseudoOf(t.to_user)} — you give</div>
-            <div class="sticker-chips" style="margin-top:6px;">${t.offer_codes.map(c=>tradeChip(c,'give')).join('')}</div>
-            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">for their:</div>
-            <div class="sticker-chips">${t.request_codes.map(c=>tradeChip(c,'get')).join('')}</div>
-          </div>
-          <button class="btn ghost" data-cancel="${t.id}">Cancel</button>
-        </div>`).join('')}
-      <h3 style="font-size:15px;margin:18px 0 8px;">Approved — not applied yet (${accepted.length})</h3>
-      ${accepted.length===0?'<p class="empty-note">Nothing here. Trades land here once accepted, and stay until someone confirms the swap actually happened.</p>':accepted.map(t=>{
-        const otherId = t.from_user===profile.id ? t.to_user : t.from_user;
-        const youGive = t.from_user===profile.id ? t.offer_codes : t.request_codes;
-        const youGet = t.from_user===profile.id ? t.request_codes : t.offer_codes;
-        return `
-        <div class="member-row" style="cursor:default;align-items:flex-start;">
-          <div style="flex:1;">
-            <div class="name">With ${pseudoOf(otherId)} — you give</div>
-            <div class="sticker-chips" style="margin-top:6px;">${youGive.map(c=>tradeChip(c,'give')).join('')}</div>
-            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">you get:</div>
-            <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:6px;">
-            <button class="btn" data-complete="${t.id}">Deal done ✓</button>
-            <button class="btn ghost" data-cancel="${t.id}" style="font-size:12px;padding:5px 10px;">Cancel</button>
-            <button class="btn ghost" data-delete-history="${t.id}" style="font-size:12px;padding:5px 10px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
-          </div>
-        </div>`;
-      }).join('')}
-      <h3 style="font-size:15px;margin:18px 0 8px;">History</h3>
-      ${history.length===0?'<p class="empty-note">No finished trades yet.</p>':history.map(t=>{
-        const sent = t.from_user===profile.id;
-        return `
-        <div class="member-row" style="cursor:default;align-items:flex-start;" id="mytrade-${t.id}">
-          <div style="flex:1;">
-            <div class="name"><span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>&nbsp; ${sent?'To':'From'} ${pseudoOf(sent?t.to_user:t.from_user)}</div>
-            <div class="sticker-chips" style="margin-top:6px;">${(sent?t.offer_codes:t.request_codes).map(c=>tradeChip(c, sent?'give':'get')).join('')}</div>
-            <div style="margin:8px 0 6px;font-size:12px;color:var(--mist);">⇄</div>
-            <div class="sticker-chips">${(sent?t.request_codes:t.offer_codes).map(c=>tradeChip(c, sent?'get':'give')).join('')}</div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
-            <div class="count" style="text-transform:capitalize;">${t.status}</div>
-            ${t.status==='completed'?'':''}
-            <button class="btn ghost" data-delete-history="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
-          </div>
-        </div>`;
-      }).join('')}
+  const tradeCard = (t, mode) => {
+    const sent = t.from_user === profile.id;
+    const other = pseudoOf(sent ? t.to_user : t.from_user);
+    const youGive = sent ? t.offer_codes : t.request_codes;
+    const youGet = sent ? t.request_codes : t.offer_codes;
+    const date = fmt(t.created_at);
+    const isCompleted = t.status === 'completed';
+    const borderColor = isCompleted ? 'var(--green)' : t.status==='rejected'||t.status==='cancelled' ? 'var(--line)' : 'var(--line)';
+    const bg = isCompleted ? 'background:linear-gradient(135deg,#eafaf1,#d5f5e3 80%);' : '';
+    let buttons = '';
+    if (mode==='waiting') buttons = `<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+      <button class="btn" data-approve="${t.id}">Approve</button>
+      <button class="btn ghost" data-reject="${t.id}">Reject</button>
     </div>`;
+    else if (mode==='sent') buttons = `<button class="btn ghost" data-cancel="${t.id}" style="flex-shrink:0;">Cancel</button>`;
+    else if (mode==='accepted') buttons = `<div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0;">
+      <button class="btn" data-complete="${t.id}">Deal done ✓</button>
+      <button class="btn ghost" data-cancel="${t.id}" style="font-size:12px;padding:5px 10px;">Cancel</button>
+      <button class="btn ghost" data-delete-history="${t.id}" style="font-size:12px;padding:5px 10px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
+    </div>`;
+    else buttons = `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex-shrink:0;">
+      <span style="font-size:12px;font-weight:700;text-transform:capitalize;color:${isCompleted?'var(--green)':'var(--mist)'};">${isCompleted?'✓ Completed':t.status}</span>
+      <button class="btn ghost" data-delete-history="${t.id}" style="padding:5px 10px;font-size:12px;color:var(--red);border-color:var(--red);background:var(--paper);">Delete</button>
+    </div>`;
+    return `
+    <div id="mytrade-${t.id}" style="border:1.5px solid ${borderColor};border-radius:10px;padding:14px;margin-bottom:10px;${bg}display:flex;gap:12px;align-items:flex-start;">
+      <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <span class="badge-pill ${sent?'promo':'special'}">${sent?'SENT':'RECEIVED'}</span>
+          <strong>${sent?'To':'From'} ${other}</strong>
+          <span style="font-size:12px;color:var(--mist);">${date}</span>
+        </div>
+        <div style="font-size:11px;color:var(--mist);margin-bottom:4px;">You give</div>
+        <div class="sticker-chips">${youGive.map(c=>tradeChip(c,'give')).join('')}</div>
+        <div style="font-size:11px;color:var(--mist);margin:8px 0 4px;">You get</div>
+        <div class="sticker-chips">${youGet.map(c=>tradeChip(c,'get')).join('')}</div>
+      </div>
+      ${buttons}
+    </div>`;
+  };
+
+  document.getElementById('myTradesPanel').innerHTML = `
+    <h2>My Trades</h2>
+
+    <h3 style="font-size:15px;margin:18px 0 8px;">⏳ Waiting on you (${waitingOnYou.length})</h3>
+    ${waitingOnYou.length===0?'<p class="empty-note">Nothing pending.</p>':waitingOnYou.map(t=>tradeCard(t,'waiting')).join('')}
+
+    <h3 style="font-size:15px;margin:18px 0 8px;">📤 Sent by you (${sentByYou.length})</h3>
+    ${sentByYou.length===0?'<p class="empty-note">Nothing sent.</p>':sentByYou.map(t=>tradeCard(t,'sent')).join('')}
+
+    <h3 style="font-size:15px;margin:18px 0 8px;">🤝 Agreed — swap pending (${accepted.length})</h3>
+    ${accepted.length===0?'<p class="empty-note">Nothing here yet.</p>':accepted.map(t=>tradeCard(t,'accepted')).join('')}
+
+    <h3 style="font-size:15px;margin:18px 0 8px;">📋 History</h3>
+    ${history.length===0?'<p class="empty-note">No finished trades yet.</p>':history.map(t=>tradeCard(t,'history')).join('')}`;
+
   document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleAccept(b.dataset.approve); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
   document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleRespond(b.dataset.reject,'rejected'); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
   document.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=async()=>{ try{ b.disabled=true; await handleRespond(b.dataset.cancel,'cancelled'); }catch(e){ b.disabled=false; alert('Error: '+e.message); }});
@@ -1608,7 +1592,7 @@ async function renderSearch(main){
 
 /* ============================================================ MEMBERS ============================================================ */
 async function renderMembers(main){
-  main.innerHTML = `<div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🥇🥈🥉 medals go to the top 3 in each category</li></ul></div><div class="panel"><h2>Members</h2><div class="loading">Loading…</div></div>`;
+  main.innerHTML = `<div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>100% members get a special gold section. 🏆🥈🥉 for top 3 in the race.</li></ul></div><div class="panel"><h2>Members</h2><div class="loading">Loading…</div></div>`;
   await loadAllMembers();
   const rows = allMembers.map(m=>{
     let have=0,dup=0;
@@ -1617,39 +1601,62 @@ async function renderMembers(main){
     return {pseudo:m.pseudo, pct, dup, isMe:m.id===profile.id};
   }).sort((a,b)=>b.pct-a.pct);
 
-  const dupRanked = [...rows].sort((a,b)=>b.dup-a.dup);
-
+  const completed = rows.filter(r=>r.pct===100);
+  const racing = rows.filter(r=>r.pct<100);
+  const dupRanked = [...racing].sort((a,b)=>b.dup-a.dup);
   const rankIcon = (i, val) => {
-    if (val === 0) return '';
-    if (i === 0) return '🏆';
-    if (i === 1) return '🥈';
-    if (i === 2) return '🥉';
+    if (val===0) return '';
+    if (i===0) return '🏆';
+    if (i===1) return '🥈';
+    if (i===2) return '🥉';
     return `${i+1}.`;
   };
 
   document.getElementById('main').innerHTML = `
-    <div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>🏆🥈🥉 for top 3, numbers for the rest</li></ul></div>
+    <div class="help-box"><h3>👥 How Members works</h3><ul><li><strong>Complete %</strong> — how much of the full 994-sticker album each person has</li><li><strong>Duplicates</strong> — total spare copies available to trade</li><li>100% members get the gold Hall of Fame. 🏆🥈🥉 for the top 3 still racing.</li></ul></div>
+
+    ${completed.length?`
+    <div style="border:3px solid #C9A84C;border-radius:14px;padding:20px;margin-bottom:16px;background:linear-gradient(135deg,#FFFBE6,#FFF3C4 60%,#FDEAA0);box-shadow:0 2px 12px rgba(201,168,76,0.25);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">
+        <span style="font-size:28px;">🏅</span>
+        <div>
+          <div style="font-family:'Poppins',sans-serif;font-weight:900;font-size:18px;color:#7A5C00;">Hall of Fame</div>
+          <div style="font-size:12px;color:#9A7A20;">Album 100% complete</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;">
+        ${completed.map(r=>`
+        <div style="display:flex;align-items:center;gap:10px;background:rgba(255,255,255,0.7);border:2px solid #C9A84C;border-radius:10px;padding:10px 16px;">
+          <span style="font-size:22px;">⭐</span>
+          <div>
+            <div style="font-weight:800;font-size:15px;color:#5A3E00;">${r.pseudo}${r.isMe?' (you)':''}</div>
+            <div style="font-size:12px;color:#9A7A20;">100% · ${r.dup} spare${r.dup!==1?'s':''}</div>
+          </div>
+        </div>`).join('')}
+      </div>
+    </div>`:''}
+
     <div class="panel">
-      <h2>Members (${rows.length})</h2>
+      <h2>Still racing (${racing.length})</h2>
+      ${racing.length===0?'<p class="empty-note">Everyone has completed their album — incredible!</p>':`
       <table class="members-table">
         <thead><tr><th style="width:40px;text-align:center;">#</th><th>Name</th><th>Complete</th><th style="text-align:right;">Duplicates</th><th style="width:40px;text-align:center;">#</th></tr></thead>
-        <tbody>${rows.map((r,i)=>{
+        <tbody>${racing.map((r,i)=>{
           const dupIdx = dupRanked.findIndex(d=>d.pseudo===r.pseudo);
           return `
           <tr style="${r.isMe?'background:var(--blue-soft);font-weight:700;':''}">
-            <td style="text-align:center;font-size:${i<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(i, r.pct)}</td>
+            <td style="text-align:center;font-size:${i<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(i,r.pct)}</td>
             <td>${r.pseudo}${r.isMe?' (you)':''}</td>
             <td class="mono">${r.pct}%</td>
             <td class="mono" style="text-align:right;">${r.dup}</td>
-            <td style="text-align:center;font-size:${dupIdx<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(dupIdx, r.dup)}</td>
+            <td style="text-align:center;font-size:${dupIdx<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(dupIdx,r.dup)}</td>
           </tr>`;
         }).join('')}
         </tbody>
-      </table>
+      </table>`}
     </div>`;
 }
 
+
 init();
-</script>
-</body>
-</html>
+</s
