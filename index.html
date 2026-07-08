@@ -369,14 +369,23 @@ let openTeams = new Set();
 const root = document.getElementById('app');
 
 async function init(){
-  if (!IS_CONFIGURED){ renderNotConfigured(); return; }
-  const savedId = localStorage.getItem('my_profile_id');
-  if (savedId){
-    const { data } = await sb.from('profiles').select('*').eq('id', savedId).maybeSingle();
-    if (data){ profile = data; await loadMyCollection(); renderShell(); return; }
-    localStorage.removeItem('my_profile_id'); // saved id no longer exists, start fresh
+  try{
+    if (!IS_CONFIGURED){ renderNotConfigured(); return; }
+    const savedId = localStorage.getItem('my_profile_id');
+    if (savedId){
+      const { data } = await sb.from('profiles').select('*').eq('id', savedId).maybeSingle();
+      if (data){ profile = data; await loadMyCollection(); renderShell(); return; }
+      localStorage.removeItem('my_profile_id');
+    }
+    renderAuth();
+  }catch(err){
+    document.getElementById('app').innerHTML = `<div style="padding:40px;font-family:sans-serif;color:#c00;">
+      <h2>⚠ Loading error</h2>
+      <p>${err.message}</p>
+      <pre style="font-size:11px;background:#f5f5f5;padding:10px;border-radius:6px;">${err.stack||''}</pre>
+      <button onclick="localStorage.clear();location.reload()">Clear & reload</button>
+    </div>`;
   }
-  renderAuth();
 }
 
 function renderNotConfigured(){
@@ -1646,17 +1655,4 @@ async function renderMembers(main){
           return `
           <tr style="${r.isMe?'background:var(--blue-soft);font-weight:700;':''}">
             <td style="text-align:center;font-size:${i<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(i,r.pct)}</td>
-            <td>${r.pseudo}${r.isMe?' (you)':''}</td>
-            <td class="mono">${r.pct}%</td>
-            <td class="mono" style="text-align:right;">${r.dup}</td>
-            <td style="text-align:center;font-size:${dupIdx<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(dupIdx,r.dup)}</td>
-          </tr>`;
-        }).join('')}
-        </tbody>
-      </table>`}
-    </div>`;
-}
-
-
-init();
-</s
+            <td>${r.pseudo}${r.isMe
