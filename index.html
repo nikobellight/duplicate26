@@ -1655,4 +1655,19 @@ async function renderMembers(main){
           return `
           <tr style="${r.isMe?'background:var(--blue-soft);font-weight:700;':''}">
             <td style="text-align:center;font-size:${i<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(i,r.pct)}</td>
-            <td>${r.pseudo}${r.isMe
+            <td>${r.pseudo}${r.isMe?' (you)':''}</td>
+            <td class="mono">${r.pct}%</td>
+            <td class="mono" style="text-align:right;">${r.dup}</td>
+            <td style="text-align:center;font-size:${dupIdx<3?'20px':'14px'};font-weight:700;color:var(--mist);">${rankIcon(dupIdx,r.dup)}</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>`}
+    </div>`;
+}
+
+
+init();
+</script>
+</body>
+</html>
